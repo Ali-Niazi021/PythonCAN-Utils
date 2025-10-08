@@ -1,0 +1,14 @@
+# PCAN Driver Requirements
+# Python dependencies for PCAN-USB adapter communication
+
+# Core CAN bus library with PCAN support
+python-can>=4.0.0
+
+# GUI library for PCAN Explorer application
+dearpygui>=1.10.0
+
+# DBC file parsing for CAN message decoding
+cantools>=39.0.0
+
+# Optional: Additional CAN tools and protocols
+# cantools>=39.0.0  # For DBC file parsing and CAN message encoding/decoding

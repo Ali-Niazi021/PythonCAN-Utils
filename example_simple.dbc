@@ -1,0 +1,42 @@
+VERSION ""
+
+NS_ : 
+    NS_DESC_
+    CM_
+    BA_DEF_
+    BA_
+    VAL_
+
+BS_:
+
+BU_: Sensor ECU Dashboard
+
+BO_ 256 SensorData: 8 Sensor
+ SG_ Temperature : 0|16@1- (0.01,0) [-273.15|327.67] "degC"  Dashboard
+ SG_ Humidity : 16|16@1+ (0.01,0) [0|100] "%"  Dashboard
+ SG_ Pressure : 32|16@1+ (0.1,0) [0|6553.5] "kPa"  Dashboard
+ SG_ BatteryVoltage : 48|16@1+ (0.001,0) [0|65.535] "V"  Dashboard
+
+CM_ SG_ 256 Temperature "Ambient temperature sensor reading";
+CM_ SG_ 256 Humidity "Relative humidity percentage";
+CM_ SG_ 256 Pressure "Atmospheric pressure reading";
+CM_ SG_ 256 BatteryVoltage "Battery voltage level";
+
+BO_ 512 EngineStatus: 8 ECU
+ SG_ EngineRPM : 0|16@1+ (1,0) [0|8000] "RPM"  Dashboard
+ SG_ VehicleSpeed : 16|16@1+ (0.01,0) [0|300] "km/h"  Dashboard
+ SG_ CurrentGear : 32|4@1+ (1,0) [0|7] ""  Dashboard
+ SG_ EngineRunning : 36|1@1+ (1,0) [0|1] ""  Dashboard
+ SG_ CheckEngine : 37|1@1+ (1,0) [0|1] ""  Dashboard
+ SG_ FuelLevel : 40|8@1+ (0.5,0) [0|127.5] "L"  Dashboard
+
+CM_ SG_ 512 EngineRPM "Engine rotational speed";
+CM_ SG_ 512 VehicleSpeed "Vehicle speed from wheel sensors";
+CM_ SG_ 512 CurrentGear "Current transmission gear";
+CM_ SG_ 512 EngineRunning "Engine running status";
+CM_ SG_ 512 CheckEngine "Check engine light status";
+CM_ SG_ 512 FuelLevel "Fuel tank level";
+
+VAL_ 512 CurrentGear 0 "Neutral" 1 "First" 2 "Second" 3 "Third" 4 "Fourth" 5 "Fifth" 6 "Sixth" 7 "Reverse" ;
+VAL_ 512 EngineRunning 0 "Stopped" 1 "Running" ;
+VAL_ 512 CheckEngine 0 "OK" 1 "Fault" ;
