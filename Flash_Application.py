@@ -26,7 +26,7 @@ from dataclasses import dataclass
 
 # Import the PCAN driver
 try:
-    from PCAN_Driver import PCANDriver, PCANChannel, PCANBaudRate, CANMessage
+    from drivers.PCAN_Driver import PCANDriver, PCANChannel, PCANBaudRate, CANMessage
 except ImportError:
     print("Error: PCAN_Driver.py not found in the same directory")
     print("Please ensure PCAN_Driver.py is in the same folder as this script")

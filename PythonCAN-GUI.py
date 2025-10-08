@@ -11,7 +11,7 @@ Date: October 8, 2025
 """
 
 import dearpygui.dearpygui as dpg
-from PCAN_Driver import PCANDriver, PCANChannel, PCANBaudRate, CANMessage
+from drivers.PCAN_Driver import PCANDriver, PCANChannel, PCANBaudRate, CANMessage
 from typing import Dict, Optional, Callable
 from datetime import datetime
 import threading
