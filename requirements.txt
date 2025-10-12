@@ -1,8 +1,14 @@
-# PCAN Driver Requirements
-# Python dependencies for PCAN-USB adapter communication
+# PCAN and CANable Driver Requirements
+# Python dependencies for PCAN-USB and CANable adapter communication
 
-# Core CAN bus library with PCAN support
+# Core CAN bus library with PCAN and gs_usb (Candle API) support
 python-can>=4.0.0
+
+# USB communication for CANable devices (Candle API / gs_usb)
+pyusb>=1.2.1
+
+# Serial communication for CANable devices (legacy SLCAN - not used with Candle API)
+# pyserial>=3.5
 
 # GUI library for PCAN Explorer application
 dearpygui>=1.10.0
