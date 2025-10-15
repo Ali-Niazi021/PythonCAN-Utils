@@ -18,6 +18,7 @@ from datetime import datetime
 import threading
 import os
 import time
+import subprocess
 from pathlib import Path
 
 # Import both drivers
@@ -54,9 +55,9 @@ except ImportError:
 # Bootloader Protocol Constants
 # ============================================================================
 
-# CAN IDs
-CAN_HOST_ID = 0x701
-CAN_BOOTLOADER_ID = 0x700
+# CAN IDs (29-bit Extended IDs)
+CAN_HOST_ID = 0x18000701
+CAN_BOOTLOADER_ID = 0x18000700
 
 # Commands
 CMD_ERASE_FLASH = 0x01
@@ -87,7 +88,10 @@ ERR_TIMEOUT = 0x07
 
 # Memory Configuration
 APP_START_ADDRESS = 0x08008000
-APP_MAX_SIZE = 224 * 1024  # 224 KB
+PERMANENT_STORAGE_SIZE = 0x4000         # 16KB reserved for permanent data
+PERMANENT_STORAGE_ADDRESS = 0x0803C000  # Last 16KB of flash (256KB - 16KB)
+APP_END_ADDRESS = 0x0803BFFF            # Application ends before permanent storage
+APP_MAX_SIZE = 0x34000                  # 208 KB (APPLICATION_END - APPLICATION_START + 1)
 
 # Timing
 RESPONSE_TIMEOUT = 1.0
@@ -1235,16 +1239,16 @@ class PCANExplorerGUI:
         return None
     
     def _send_command(self, cmd: int, data: bytes = b'') -> bool:
-        """Send command to bootloader."""
+        """Send command to bootloader using 29-bit extended ID."""
         msg_data = bytes([cmd]) + data
         msg_data = msg_data + b'\x00' * (8 - len(msg_data))  # Pad to 8 bytes
-        return self.driver.send_message(CAN_HOST_ID, msg_data[:8])
+        return self.driver.send_message(CAN_HOST_ID, msg_data[:8], is_extended=True)
     
     def _send_command_list(self, cmd: int, data_list: list = []) -> bool:
-        """Send command to bootloader with data as list."""
+        """Send command to bootloader with data as list using 29-bit extended ID."""
         msg_data = [cmd] + data_list
         msg_data = msg_data + [0x00] * (8 - len(msg_data))  # Pad to 8 bytes
-        return self.driver.send_message(CAN_HOST_ID, bytes(msg_data[:8]))
+        return self.driver.send_message(CAN_HOST_ID, bytes(msg_data[:8]), is_extended=True)
     
     def _flash_erase(self):
         """Erase flash memory."""
@@ -1283,9 +1287,9 @@ class PCANExplorerGUI:
             self.flash_in_progress = False
     
     def _flash_firmware(self):
-        """Flash firmware to device."""
+        """Flash firmware to device using Flash_Application.py script."""
         if not self.is_connected:
-            self._show_popup("Not Connected", "Please connect to PCAN first.")
+            self._show_popup("Not Connected", "Please connect to CAN device first.")
             return
         
         if not self.flash_firmware_path:
@@ -1295,109 +1299,126 @@ class PCANExplorerGUI:
         threading.Thread(target=self._flash_firmware_thread, daemon=True).start()
     
     def _flash_firmware_thread(self):
-        """Flash firmware thread."""
+        """Flash firmware thread - wraps Flash_Application.py script."""
         try:
             self.flash_in_progress = True
+            dpg.set_value(self.flash_progress_bar, 0)
             
-            # Read firmware file
-            with open(self.flash_firmware_path, 'rb') as f:
-                firmware_data = f.read()
+            # Determine device type and channel
+            device_arg = self.device_type
             
-            # Pad to 4-byte boundary
-            if len(firmware_data) % 4 != 0:
-                padding = 4 - (len(firmware_data) % 4)
-                firmware_data += b'\xFF' * padding
+            # Get channel string
+            if self.device_type == 'pcan':
+                # Extract channel name from enum (e.g., "USB1" from PCANChannel.USB1)
+                channel_str = str(self.driver._channel).split('.')[-1] if hasattr(self.driver, '_channel') else 'USB1'
+            else:
+                # CANable uses device index
+                channel_str = str(self.driver._device_index) if hasattr(self.driver, '_device_index') else '0'
             
-            total_bytes = len(firmware_data)
-            self._log_flash(f"Flashing {total_bytes} bytes...")
-            
-            # IMPORTANT: Erase flash first!
-            self._log_flash("Step 1: Erasing flash...")
-            dpg.set_value(self.flash_status_text, "Erasing flash...")
-            dpg.configure_item(self.flash_status_text, color=(255, 200, 100))
-            
-            if not self._send_command(CMD_ERASE_FLASH):
-                raise Exception("Failed to send erase command")
-            
-            response = self._wait_for_response(ERASE_TIMEOUT)
-            if not response or response[0] != RESP_ACK:
-                raise Exception("Flash erase failed")
-            
-            self._log_flash("✓ Flash erased successfully")
-            time.sleep(0.1)
-            
-            # Set address - use MSB first (big-endian)
-            self._log_flash("Step 2: Setting write address...")
-            addr_bytes = [
-                (APP_START_ADDRESS >> 24) & 0xFF,
-                (APP_START_ADDRESS >> 16) & 0xFF,
-                (APP_START_ADDRESS >> 8) & 0xFF,
-                APP_START_ADDRESS & 0xFF
+            # Build command to run Flash_Application.py
+            script_path = Path(__file__).parent / "Flash_Application.py"
+            cmd = [
+                sys.executable,
+                str(script_path),
+                self.flash_firmware_path,
+                "--device", device_arg,
+                "--channel", channel_str
             ]
             
-            if not self._send_command_list(CMD_SET_ADDRESS, addr_bytes):
-                raise Exception("Failed to send set address command")
+            self._log_flash(f"Starting flash process: {' '.join(cmd)}")
+            dpg.set_value(self.flash_status_text, "Initializing flash...")
+            dpg.configure_item(self.flash_status_text, color=(255, 200, 100))
             
-            response = self._wait_for_response()
-            if not response or response[0] != RESP_ACK:
-                error_code = response[1] if response and len(response) > 1 else 0
-                error_desc = ERROR_DESCRIPTIONS.get(error_code, f"Error {error_code}")
-                raise Exception(f"Address setting failed: {error_desc}")
+            # Disconnect GUI's CAN connection temporarily to avoid conflicts
+            self._log_flash("Temporarily disconnecting GUI from CAN bus...")
+            was_connected = self.is_connected
+            if was_connected:
+                self.driver.disconnect()
+                self.is_connected = False
+                time.sleep(0.5)  # Give time for disconnect
             
-            self._log_flash(f"✓ Address set to 0x{APP_START_ADDRESS:08X}")
-            time.sleep(0.05)
+            # Run the flash script and capture output
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
             
-            # Write data in 4-byte chunks
-            self._log_flash(f"Step 3: Writing {total_bytes} bytes...")
-            dpg.set_value(self.flash_status_text, "Writing firmware...")
-            dpg.configure_item(self.flash_status_text, color=(100, 200, 255))
-            bytes_written = 0
-            for offset in range(0, total_bytes, WRITE_CHUNK_SIZE):
-                chunk = firmware_data[offset:offset + WRITE_CHUNK_SIZE]
-                
-                # Send write command: [CMD_WRITE_DATA] [0x04] [byte0] [byte1] [byte2] [byte3]
-                cmd_data = [0x04] + list(chunk)
-                if not self._send_command_list(CMD_WRITE_DATA, cmd_data):
-                    raise Exception(f"Failed to send chunk at offset {offset}")
-                
-                # Wait for ACK - bootloader must acknowledge each write
-                response = self._wait_for_response(1.0)  # 1 second timeout
-                
-                if not response:
-                    raise Exception(f"No response from bootloader at offset {offset}")
-                
-                if response[0] == RESP_ACK:
-                    # Success, continue
-                    pass
-                elif response[0] == RESP_NACK:
-                    error_code = response[1] if len(response) > 1 else 0
-                    error_desc = ERROR_DESCRIPTIONS.get(error_code, f"Error {error_code}")
-                    raise Exception(f"Write failed at {offset}: {error_desc}")
+            # Read output line by line
+            line_count = 0
+            for line in iter(process.stdout.readline, ''):
+                if line:
+                    line = line.strip()
+                    self._log_flash(line)
+                    line_count += 1
+                    
+                    # Parse progress from output if possible
+                    if "%" in line:
+                        try:
+                            # Try to extract percentage
+                            parts = line.split("%")
+                            if len(parts) > 0:
+                                percent_part = parts[0].split()[-1]
+                                progress = float(percent_part) / 100.0
+                                dpg.set_value(self.flash_progress_bar, progress)
+                                dpg.set_value(self.flash_status_text, f"Flashing: {percent_part}%")
+                        except:
+                            pass
+                    
+                    # Update status based on keywords
+                    if "Erasing" in line:
+                        dpg.set_value(self.flash_status_text, "Erasing flash...")
+                        dpg.configure_item(self.flash_status_text, color=(255, 200, 100))
+                    elif "Writing" in line:
+                        dpg.set_value(self.flash_status_text, "Writing firmware...")
+                        dpg.configure_item(self.flash_status_text, color=(100, 200, 255))
+                    elif "Verifying" in line:
+                        dpg.set_value(self.flash_status_text, "Verifying...")
+                        dpg.configure_item(self.flash_status_text, color=(255, 255, 100))
+            
+            # Wait for process to complete
+            return_code = process.wait()
+            
+            # Reconnect GUI to CAN bus
+            if was_connected:
+                time.sleep(1.0)  # Give flash script time to release CAN
+                self._log_flash("Reconnecting GUI to CAN bus...")
+                if self.device_type == 'pcan':
+                    self.driver.connect(self.driver._channel, self.driver._baudrate)
                 else:
-                    raise Exception(f"Unexpected response at {offset}: 0x{response[0]:02X}")
-                
-                bytes_written += len(chunk)
-                
-                # Update progress
-                progress = bytes_written / total_bytes
-                dpg.set_value(self.flash_progress_bar, progress)
-                dpg.set_value(self.flash_status_text, 
-                            f"Writing: {bytes_written}/{total_bytes} bytes ({progress*100:.1f}%)")
-                
-                # Every 256 bytes, log progress
-                if offset % 256 == 0:
-                    self._log_flash(f"Written: {bytes_written}/{total_bytes} bytes")
-                
-                time.sleep(0.002)  # Small delay between chunks
+                    self.driver.connect(self.driver._device_index, self.driver._baudrate)
+                self.is_connected = True
             
-            dpg.set_value(self.flash_status_text, "Flash complete!")
-            dpg.configure_item(self.flash_status_text, color=(100, 255, 100))
-            self._log_flash(f"✓ Successfully flashed {total_bytes} bytes")
+            # Check result
+            if return_code == 0:
+                dpg.set_value(self.flash_progress_bar, 1.0)
+                dpg.set_value(self.flash_status_text, "Flash complete!")
+                dpg.configure_item(self.flash_status_text, color=(100, 255, 100))
+                self._log_flash("✓ Firmware flashed successfully!")
+            else:
+                dpg.set_value(self.flash_status_text, f"Flash failed (exit code {return_code})")
+                dpg.configure_item(self.flash_status_text, color=(255, 100, 100))
+                self._log_flash(f"✗ Flash process failed with exit code {return_code}")
             
         except Exception as e:
             dpg.set_value(self.flash_status_text, f"Error: {str(e)}")
             dpg.configure_item(self.flash_status_text, color=(255, 100, 100))
             self._log_flash(f"✗ Error: {str(e)}")
+            
+            # Try to reconnect if we were connected
+            try:
+                if was_connected and not self.is_connected:
+                    if self.device_type == 'pcan':
+                        self.driver.connect(self.driver._channel, self.driver._baudrate)
+                    else:
+                        self.driver.connect(self.driver._device_index, self.driver._baudrate)
+                    self.is_connected = True
+            except:
+                pass
+                
         finally:
             self.flash_in_progress = False
     

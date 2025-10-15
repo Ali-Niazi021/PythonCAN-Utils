@@ -50,9 +50,9 @@ if not PCAN_AVAILABLE and not CANABLE_AVAILABLE:
 # Bootloader Protocol Constants
 # ============================================================================
 
-# CAN IDs
-CAN_HOST_ID = 0x701          # PC sends commands to this ID
-CAN_BOOTLOADER_ID = 0x700    # Bootloader responds from this ID
+# CAN IDs (29-bit Extended IDs)
+CAN_HOST_ID = 0x18000701          # PC sends commands to this ID (Extended)
+CAN_BOOTLOADER_ID = 0x18000700    # Bootloader responds from this ID (Extended)
 
 # Commands
 CMD_ERASE_FLASH = 0x01
@@ -83,7 +83,10 @@ ERR_TIMEOUT = 0x07
 
 # Memory Configuration
 APP_START_ADDRESS = 0x08008000
-APP_MAX_SIZE = 224 * 1024  # 224 KB
+PERMANENT_STORAGE_SIZE = 0x4000         # 16KB reserved for permanent data
+PERMANENT_STORAGE_ADDRESS = 0x0803C000  # Last 16KB of flash (256KB - 16KB)
+APP_END_ADDRESS = 0x0803BFFF            # Application ends before permanent storage
+APP_MAX_SIZE = 0x34000                  # 208 KB (APPLICATION_END - APPLICATION_START + 1)
 
 # Timing
 RESPONSE_TIMEOUT = 1.0       # Normal response timeout (seconds)
@@ -219,8 +222,8 @@ class CANBootloaderFlash:
         while len(msg_data) < 8:
             msg_data.append(0x00)
         
-        # Send to bootloader
-        return self.driver.send_message(CAN_HOST_ID, bytes(msg_data[:8]))
+        # Send to bootloader using 29-bit extended ID
+        return self.driver.send_message(CAN_HOST_ID, bytes(msg_data[:8]), is_extended=True)
     
     def wait_response(self, timeout: float = RESPONSE_TIMEOUT):
         """
