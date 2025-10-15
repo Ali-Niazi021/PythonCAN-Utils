@@ -35,7 +35,7 @@ A comprehensive Python-based CAN bus utility suite for PCAN-USB and CANable adap
 - **Export Functionality**: Save captured messages to CSV
 - **Period Calculation**: Automatic calculation of message transmission periods
 
-### Firmware Flasher (`Flash_Application.py`)
+### Firmware Flasher (`bootloader/Flash_Application.py`)
 - **STM32 Bootloader**: Flash firmware to STM32L432 via CAN bus
 - **Device Agnostic**: Works with both PCAN and CANable
 - **Command-Line Interface**: Scriptable firmware updates
@@ -146,30 +146,30 @@ python GUI_Master.py --device pcan --channel USB1
 
 #### Using PCAN (default)
 ```powershell
-python Flash_Application.py application.bin
-python Flash_Application.py application.bin --channel USB1
+python bootloader/Flash_Application.py application.bin
+python bootloader/Flash_Application.py application.bin --channel USB1
 ```
 
 #### Using CANable
 ```powershell
-python Flash_Application.py application.bin --device canable --channel COM3
-python Flash_Application.py application.bin --device canable --channel /dev/ttyACM0
+python bootloader/Flash_Application.py application.bin --adapter canable --channel COM3
+python bootloader/Flash_Application.py application.bin --adapter canable --channel /dev/ttyACM0
 ```
 
 #### Additional Options
 ```powershell
 # Skip verification
-python Flash_Application.py application.bin --no-verify
+python bootloader/Flash_Application.py application.bin --no-verify
 
 # Don't jump to application after flashing
-python Flash_Application.py application.bin --no-jump
+python bootloader/Flash_Application.py application.bin --no-jump
 
 # List available devices
-python Flash_Application.py --list-devices --device pcan
-python Flash_Application.py --list-devices --device canable
+python bootloader/Flash_Application.py --list-devices --adapter pcan
+python bootloader/Flash_Application.py --list-devices --adapter canable
 
 # Check bootloader status
-python Flash_Application.py --status-only --device canable --channel COM3
+python bootloader/Flash_Application.py --status-only --adapter canable --channel COM3
 ```
 
 ## GUI Features
@@ -283,10 +283,12 @@ sudo usermod -a -G dialout $USER
 
 ```
 PythonCAN-Utils/
+├── bootloader/
+│   ├── Flash_Application.py      # CLI firmware flasher
+│   └── STM32L432_Bootloader.dbc  # Bootloader CAN protocol DBC
 ├── drivers/
 │   ├── PCAN_Driver.py      # PCAN-USB driver
 │   └── CANable_Driver.py   # CANable driver (SLCAN)
-├── Flash_Application.py     # CLI firmware flasher
 ├── GUI_Master.py           # GUI application
 ├── requirements.txt        # Python dependencies
 └── README.md              # This file
@@ -357,22 +359,22 @@ Arguments:
   --channel CHANNEL        PCAN channel (e.g., USB1) or CANable port (e.g., COM3)
 ```
 
-### Flash_Application.py
+### bootloader/Flash_Application.py
 ```powershell
-python Flash_Application.py FIRMWARE [OPTIONS]
+python bootloader/Flash_Application.py FIRMWARE [OPTIONS]
 
 Arguments:
-  FIRMWARE                 Path to firmware .bin file
+  FIRMWARE                   Path to firmware .bin file
 
 Options:
-  --device {pcan,canable}  CAN adapter type (default: pcan)
-  --channel CHANNEL        PCAN channel or CANable port
-  --verify                 Verify by reading back (default: enabled)
-  --no-verify             Skip verification
-  --jump                  Jump to application after flashing (default: enabled)
-  --no-jump               Stay in bootloader
-  --status-only           Only get bootloader status
-  --list-devices          List available CAN devices
+  --adapter {pcan,canable}   CAN adapter type (default: pcan)
+  --channel CHANNEL          PCAN channel or CANable port
+  --verify                   Verify by reading back (default: enabled)
+  --no-verify                Skip verification
+  --jump                     Jump to application after flashing (default: enabled)
+  --no-jump                  Stay in bootloader
+  --status-only              Only get bootloader status
+  --list-devices             List available CAN devices
 ```
 
 ## Device Selection
@@ -380,23 +382,23 @@ Options:
 The scripts support automatic device selection:
 
 1. **No arguments**: Uses PCAN with default channel USB1
-2. **`--device pcan`**: Explicitly use PCAN
-3. **`--device canable`**: Use CANable adapter
+2. **`--adapter pcan`**: Explicitly use PCAN
+3. **`--adapter canable`**: Use CANable adapter
 4. **`--channel`**: Specify channel/port for selected device
 
 Examples:
 ```powershell
 # Default: PCAN USB1
-python Flash_Application.py firmware.bin
+python bootloader/Flash_Application.py firmware.bin
 
 # PCAN USB2
-python Flash_Application.py firmware.bin --device pcan --channel USB2
+python bootloader/Flash_Application.py firmware.bin --adapter pcan --channel USB2
 
 # CANable on COM3
-python Flash_Application.py firmware.bin --device canable --channel COM3
+python bootloader/Flash_Application.py firmware.bin --adapter canable --channel COM3
 
 # CANable on Linux
-python Flash_Application.py firmware.bin --device canable --channel /dev/ttyACM0
+python bootloader/Flash_Application.py firmware.bin --adapter canable --channel /dev/ttyACM0
 ```
 
 ## License

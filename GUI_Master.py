@@ -1,10 +1,9 @@
 """
-PythonCAN GUI Application with Integrated Firmware Flasher
-==========================================================
+PythonCAN GUI Application
+==========================
 A PCAN-Explorer-like application built with DearPyGUI.
 Allows connection to PCAN-USB or CANable adapters, sending/receiving CAN messages.
 Supports DBC file loading for automatic message decoding.
-Includes integrated STM32 bootloader firmware flashing.
 
 Author: GitHub Copilot
 Date: October 10, 2025
@@ -18,8 +17,8 @@ from datetime import datetime
 import threading
 import os
 import time
-import subprocess
 from pathlib import Path
+import json
 
 # Import both drivers
 try:
@@ -51,69 +50,13 @@ except ImportError:
     print("Install with: pip install cantools")
 
 
-# ============================================================================
-# Bootloader Protocol Constants
-# ============================================================================
-
-# CAN IDs (29-bit Extended IDs)
-CAN_HOST_ID = 0x18000701
-CAN_BOOTLOADER_ID = 0x18000700
-
-# Commands
-CMD_ERASE_FLASH = 0x01
-CMD_WRITE_FLASH = 0x02
-CMD_READ_FLASH = 0x03
-CMD_JUMP_TO_APP = 0x04
-CMD_GET_STATUS = 0x05
-CMD_SET_ADDRESS = 0x06
-CMD_WRITE_DATA = 0x07
-
-# Responses
-RESP_ACK = 0x10
-RESP_NACK = 0x11
-RESP_ERROR = 0x12
-RESP_BUSY = 0x13
-RESP_READY = 0x14
-RESP_DATA = 0x15
-
-# Error Codes
-ERR_NONE = 0x00
-ERR_INVALID_COMMAND = 0x01
-ERR_INVALID_ADDRESS = 0x02
-ERR_FLASH_ERASE_FAILED = 0x03
-ERR_FLASH_WRITE_FAILED = 0x04
-ERR_INVALID_DATA_LENGTH = 0x05
-ERR_NO_VALID_APP = 0x06
-ERR_TIMEOUT = 0x07
-
-# Memory Configuration
-APP_START_ADDRESS = 0x08008000
-PERMANENT_STORAGE_SIZE = 0x4000         # 16KB reserved for permanent data
-PERMANENT_STORAGE_ADDRESS = 0x0803C000  # Last 16KB of flash (256KB - 16KB)
-APP_END_ADDRESS = 0x0803BFFF            # Application ends before permanent storage
-APP_MAX_SIZE = 0x34000                  # 208 KB (APPLICATION_END - APPLICATION_START + 1)
-
-# Timing
-RESPONSE_TIMEOUT = 1.0
-ERASE_TIMEOUT = 15.0
-WRITE_CHUNK_SIZE = 4
-
-ERROR_DESCRIPTIONS = {
-    ERR_NONE: "No error",
-    ERR_INVALID_COMMAND: "Invalid command",
-    ERR_INVALID_ADDRESS: "Invalid address",
-    ERR_FLASH_ERASE_FAILED: "Flash erase failed",
-    ERR_FLASH_WRITE_FAILED: "Flash write failed",
-    ERR_INVALID_DATA_LENGTH: "Invalid data length",
-    ERR_NO_VALID_APP: "No valid application",
-    ERR_TIMEOUT: "Operation timeout"
-}
-
-
 class PCANExplorerGUI:
     """
-    Main GUI application for PCAN/CANable Explorer with integrated firmware flasher.
+    Main GUI application for PCAN/CANable Explorer.
     """
+    
+    # Configuration file path
+    CONFIG_FILE = Path.home() / ".pythoncan_gui_config.json"
     
     def __init__(self, device_type: str = 'pcan', channel: Union[str, 'PCANChannel'] = None):
         """Initialize the GUI application.
@@ -122,8 +65,13 @@ class PCANExplorerGUI:
             device_type: 'pcan' or 'canable'
             channel: Default channel/port to use
         """
-        self.device_type = device_type.lower()
-        self.default_channel = channel
+        # Load saved configuration
+        config = self._load_config_static()
+        self.config = config
+        
+        # Override with command line args if provided, otherwise use saved config
+        self.device_type = device_type.lower() if device_type else config.get('device_type', 'pcan')
+        self.default_channel = channel if channel is not None else config.get('channel')
         
         # Create appropriate driver
         if self.device_type == 'pcan':
@@ -145,12 +93,6 @@ class PCANExplorerGUI:
         self.dbc_database: Optional[cantools.database.Database] = None if DBC_SUPPORT else None
         self.dbc_file_path: Optional[str] = None
         
-        # Flash-related variables
-        self.flash_firmware_path: Optional[str] = None
-        self.flash_in_progress = False
-        self.flash_response_data: Optional[bytes] = None
-        self.flash_response_event = threading.Event()
-        
         # GUI element tags
         self.channel_combo = None
         self.baudrate_combo = None
@@ -160,14 +102,8 @@ class PCANExplorerGUI:
         self.stats_text = None
         self.dbc_status_text = None
         
-        # Flash tab GUI elements
-        self.flash_file_text = None
-        self.flash_progress_bar = None
-        self.flash_status_text = None
-        self.flash_log = []
-        
         # Thermistor monitoring
-        self.thermistor_temps = [None] * 8  # Store latest temps for channels 0-7
+        self.thermistor_temps = [None] * 56  # Store latest temps for channels 0-55
         self.thermistor_text_tags = []  # GUI text element tags
         self.thermistor_adc_tags = []   # ADC value text tags
         
@@ -179,7 +115,47 @@ class PCANExplorerGUI:
         # Statistics
         self.total_messages = 0
         self.start_time = None
-        
+    
+    @staticmethod
+    def _load_config_static() -> dict:
+        """Load configuration from JSON file (static version for __init__)."""
+        try:
+            config_file = Path.home() / ".pythoncan_gui_config.json"
+            if config_file.exists():
+                with open(config_file, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            print(f"Warning: Could not load config: {e}")
+        return {}
+    
+    def _load_config(self) -> dict:
+        """Load configuration from JSON file."""
+        return self._load_config_static()
+    
+    def _save_config(self):
+        """Save current configuration to JSON file."""
+        try:
+            config = {
+                'device_type': self.device_type,
+                'channel': self._get_channel_string(),
+                'baudrate': dpg.get_value(self.baudrate_combo) if self.baudrate_combo else 'BAUD_500K',
+                'dbc_file': self.dbc_file_path
+            }
+            with open(self.CONFIG_FILE, 'w') as f:
+                json.dump(config, f, indent=2)
+        except Exception as e:
+            print(f"Warning: Could not save config: {e}")
+    
+    def _get_channel_string(self) -> Optional[str]:
+        """Get the current channel as a string for saving."""
+        if self.device_type == 'pcan':
+            if hasattr(self.driver, '_channel') and self.driver._channel:
+                return self.driver._channel.name
+        else:  # canable
+            if hasattr(self.driver, '_device_index'):
+                return str(self.driver._device_index)
+        return None
+    
     def setup_gui(self):
         """Set up the DearPyGUI interface with tabs."""
         dpg.create_context()
@@ -191,7 +167,7 @@ class PCANExplorerGUI:
         
         # Main window
         device_name = "PCAN/CANable" if PCAN_AVAILABLE and CANABLE_AVAILABLE else self.device_type.upper()
-        with dpg.window(label=f"{device_name} Explorer & Flasher", tag="main_window", width=1250, height=850):
+        with dpg.window(label=f"{device_name} Explorer", tag="main_window", width=1250, height=850):
             
             # Connection Panel (always visible)
             with dpg.group(horizontal=True):
@@ -216,20 +192,38 @@ class PCANExplorerGUI:
                 # Populate channel combo based on device type
                 if self.device_type == 'pcan':
                     channel_items = [channel.name for channel in PCANChannel]
-                    default_channel = self.default_channel.name if self.default_channel else "USB1"
+                    # Use saved channel or command line arg or default
+                    if self.default_channel and hasattr(self.default_channel, 'name'):
+                        default_channel = self.default_channel.name
+                    elif self.default_channel and isinstance(self.default_channel, str):
+                        default_channel = self.default_channel
+                    elif 'channel' in self.config and self.config['channel']:
+                        default_channel = self.config['channel']
+                    else:
+                        default_channel = "USB1"
                 else:
                     # For CANable, get available devices and show indices
                     try:
                         canable_devices = self.driver.get_available_devices()
                         if canable_devices:
                             channel_items = [f"Device {dev['index']}: {dev['description']}" for dev in canable_devices]
-                            default_channel = channel_items[0] if channel_items else "Device 0"
+                            # Try to match saved channel
+                            saved_idx = self.config.get('channel', '0') if self.default_channel is None else str(self.default_channel)
+                            default_channel = None
+                            for item in channel_items:
+                                if item.startswith(f"Device {saved_idx}:"):
+                                    default_channel = item
+                                    break
+                            if not default_channel:
+                                default_channel = channel_items[0] if channel_items else "Device 0"
                         else:
                             channel_items = ["Device 0", "Device 1", "Device 2"]
-                            default_channel = "Device 0"
+                            saved_idx = self.config.get('channel', '0') if self.default_channel is None else str(self.default_channel)
+                            default_channel = f"Device {saved_idx}"
                     except:
                         channel_items = ["Device 0", "Device 1", "Device 2"]
-                        default_channel = "Device 0"
+                        saved_idx = self.config.get('channel', '0') if self.default_channel is None else str(self.default_channel)
+                        default_channel = f"Device {saved_idx}"
                 
                 self.channel_combo = dpg.add_combo(
                     items=channel_items,
@@ -242,9 +236,10 @@ class PCANExplorerGUI:
                 
                 # Baud rate combo (same for both)
                 baudrate_items = [br.name for br in (PCANBaudRate if self.device_type == 'pcan' else CANableBaudRate)]
+                default_baudrate = self.config.get('baudrate', 'BAUD_500K')
                 self.baudrate_combo = dpg.add_combo(
                     items=baudrate_items,
-                    default_value="BAUD_500K",
+                    default_value=default_baudrate,
                     width=130
                 )
                 
@@ -275,14 +270,10 @@ class PCANExplorerGUI:
                 # ===== CELL VOLTAGE MONITOR TAB =====
                 with dpg.tab(label="Cell Voltage Monitor"):
                     self._setup_cell_voltage_tab()
-                
-                # ===== FIRMWARE FLASHER TAB =====
-                with dpg.tab(label="Firmware Flasher"):
-                    self._setup_flasher_tab()
         
         # Setup viewport
         dpg.create_viewport(
-            title=f"{device_name} Explorer & STM32 Flasher",
+            title=f"{device_name} Explorer",
             width=1270,
             height=900,
             min_width=900,
@@ -293,6 +284,22 @@ class PCANExplorerGUI:
         dpg.show_viewport()
         dpg.set_primary_window("main_window", True)
         dpg.bind_font(default_font)
+        
+        # Auto-load saved DBC file if it exists
+        self._auto_load_dbc()
+    
+    def _auto_load_dbc(self):
+        """Automatically load the last used DBC file if it exists."""
+        if not DBC_SUPPORT:
+            return
+        
+        saved_dbc = self.config.get('dbc_file')
+        if saved_dbc and os.path.exists(saved_dbc):
+            try:
+                self._load_dbc_file_path(saved_dbc)
+                print(f"Auto-loaded DBC file: {saved_dbc}")
+            except Exception as e:
+                print(f"Could not auto-load DBC file: {e}")
     
     def _setup_explorer_tab(self):
         """Setup the CAN Explorer tab content."""
@@ -360,60 +367,50 @@ class PCANExplorerGUI:
     
     def _setup_thermistor_tab(self):
         """Setup the Thermistor Monitor tab content."""
-        dpg.add_text("8-Channel Thermistor Temperature Monitor", color=(100, 255, 200))
-        dpg.add_text("Displays real-time temperature readings from all 8 thermistor channels", color=(150, 150, 150))
+        dpg.add_text("56-Channel Thermistor Temperature Monitor", color=(100, 255, 200))
+        dpg.add_text("Real-time temperature readings from all 56 thermistor channels (0.1°C resolution)", color=(150, 150, 150))
         dpg.add_separator()
         
-        # Temperature Display Grid
-        dpg.add_text("Temperature Readings (0.1°C resolution):", color=(200, 200, 255))
-        dpg.add_spacing(count=2)
-        
-        # Create 2x4 grid for 8 channels
-        for row in range(2):
-            with dpg.group(horizontal=True):
-                for col in range(4):
-                    channel = row * 4 + col
-                    
-                    with dpg.child_window(width=280, height=120, border=True):
-                        dpg.add_text(f"Channel {channel}", color=(255, 200, 100))
-                        dpg.add_separator()
-                        
-                        # Temperature value (large text)
-                        with dpg.group(horizontal=True):
-                            dpg.add_text("Temp:", color=(180, 180, 180))
-                            temp_tag = f"therm_temp_{channel}"
-                            dpg.add_text("---.-- °C", tag=temp_tag, color=(100, 255, 100))
-                            self.thermistor_text_tags.append(temp_tag)
-                        
-                        # ADC raw value
-                        with dpg.group(horizontal=True):
-                            dpg.add_text("ADC:", color=(180, 180, 180))
-                            adc_tag = f"therm_adc_{channel}"
-                            dpg.add_text("---- counts", tag=adc_tag, color=(150, 150, 255))
-                            self.thermistor_adc_tags.append(adc_tag)
-                        
-                        # Status/age indicator
-                        dpg.add_text("Last: Never", tag=f"therm_time_{channel}", color=(150, 150, 150))
-        
-        dpg.add_separator()
-        dpg.add_spacing(count=2)
-        
-        # Statistics and controls
+        # Statistics and controls at top
         with dpg.group(horizontal=True):
             dpg.add_text("Statistics:", color=(100, 200, 255))
-            dpg.add_text("Active Channels: 0/8 | Min: --°C | Max: --°C | Avg: --°C", 
+            dpg.add_text("Active: 0/56 | Min: --°C | Max: --°C | Avg: --°C", 
                         tag="therm_stats", color=(200, 200, 200))
         
-        dpg.add_spacing(count=2)
-        
-        # Control buttons
         with dpg.group(horizontal=True):
-            dpg.add_button(label="Clear History", callback=self._clear_thermistor_data, width=120, height=30)
-            dpg.add_button(label="Export Temps CSV", callback=self._export_thermistor_data, width=140, height=30)
-            dpg.add_checkbox(label="Auto-scroll", tag="therm_autoscroll", default_value=True)
+            dpg.add_button(label="Clear History", callback=self._clear_thermistor_data, width=120, height=25)
+            dpg.add_button(label="Export CSV", callback=self._export_thermistor_data, width=120, height=25)
         
         dpg.add_separator()
-        dpg.add_text("Note: Temperature data comes from CAN messages 0x710-0x713 (Thermistor_Pair_0 through Thermistor_Pair_3)", 
+        dpg.add_spacing(count=1)
+        
+        # Temperature Display Grid in scrollable window
+        # Create 8 rows × 7 columns = 56 channels (very dense layout)
+        with dpg.child_window(border=True, height=650):
+            for row in range(8):
+                with dpg.group(horizontal=True):
+                    for col in range(7):
+                        channel = row * 7 + col
+                        if channel >= 56:
+                            break
+                        
+                        with dpg.child_window(width=170, height=50, border=True):
+                            with dpg.group(horizontal=True):
+                                dpg.add_text(f"{channel}:", color=(200, 200, 200))
+                                temp_tag = f"therm_temp_{channel}"
+                                dpg.add_text("---.-°C", tag=temp_tag, color=(100, 255, 100))
+                                self.thermistor_text_tags.append(temp_tag)
+                            
+                            # Hidden tags for ADC (for compatibility, not displayed)
+                            adc_tag = f"therm_adc_{channel}"
+                            dpg.add_text("", tag=adc_tag, show=False)
+                            self.thermistor_adc_tags.append(adc_tag)
+                            
+                            # Hidden tag for time (for compatibility, not displayed)
+                            dpg.add_text("", tag=f"therm_time_{channel}", show=False)
+        
+        dpg.add_separator()
+        dpg.add_text("Note: Temperature data from CAN messages 0x18FF0000-0x18FF000D (BMS_Temp_Msg_00 through BMS_Temp_Msg_13)", 
                     color=(150, 150, 150), wrap=1150)
     
     def _setup_cell_voltage_tab(self):
@@ -481,66 +478,6 @@ class PCANExplorerGUI:
         dpg.add_separator()
         dpg.add_text("Note: Cell voltage data from CAN messages 0x731-0x735 (BQ76952_Stack_Voltage, BQ76952_Cell_Voltages_1_4 through 13_16)", 
                     color=(150, 150, 150), wrap=1150)
-    
-    def _setup_flasher_tab(self):
-        """Setup the Firmware Flasher tab content."""
-        dpg.add_text("STM32L432 CAN Bootloader Firmware Flasher", color=(255, 200, 100))
-        dpg.add_separator()
-        
-        # File Selection
-        with dpg.group(horizontal=True):
-            dpg.add_text("Firmware File:")
-            self.flash_file_text = dpg.add_text("No file selected", color=(200, 200, 200))
-            dpg.add_text("  ")
-            dpg.add_button(label="Browse...", callback=self._select_firmware_file, width=100, height=28)
-        
-        dpg.add_separator()
-        
-        # Flash Controls
-        with dpg.group(horizontal=True):
-            dpg.add_button(
-                label="Erase Flash",
-                callback=self._flash_erase,
-                width=120,
-                height=35,
-                tag="erase_button"
-            )
-            dpg.add_button(
-                label="Flash Firmware",
-                callback=self._flash_firmware,
-                width=140,
-                height=35,
-                tag="flash_button"
-            )
-            dpg.add_button(
-                label="Verify Flash",
-                callback=self._flash_verify,
-                width=120,
-                height=35,
-                tag="verify_button"
-            )
-            dpg.add_button(
-                label="Jump to App",
-                callback=self._flash_jump,
-                width=120,
-                height=35,
-                tag="jump_button"
-            )
-        
-        dpg.add_separator()
-        
-        # Progress Bar
-        with dpg.group():
-            dpg.add_text("Progress:")
-            self.flash_progress_bar = dpg.add_progress_bar(default_value=0.0, width=-1, height=25)
-            self.flash_status_text = dpg.add_text("Ready", color=(200, 200, 200))
-        
-        dpg.add_separator()
-        
-        # Flash Log
-        dpg.add_text("Flash Log:", color=(100, 255, 100))
-        with dpg.child_window(border=True, height=450, tag="flash_log_window"):
-            dpg.add_text("Ready to flash firmware...", tag="flash_log_text", wrap=1150)
     
     # ============================================================================
     # Connection Methods
@@ -613,6 +550,9 @@ class PCANExplorerGUI:
                 # Start receiving messages
                 self.driver.start_receive_thread(self._on_message_received)
                 
+                # Save connection settings
+                self._save_config()
+                
                 # Disable controls
                 dpg.configure_item(self.channel_combo, enabled=False)
                 dpg.configure_item(self.baudrate_combo, enabled=False)
@@ -622,17 +562,19 @@ class PCANExplorerGUI:
                 self._show_popup("Connection Failed", f"Failed to connect to {self.device_type.upper()} device.")
         else:
             # Disconnect
-            self.driver.disconnect()
-            self.is_connected = False
-            dpg.set_item_label(self.connect_button, "Connect")
-            dpg.set_value(self.status_text, "Disconnected")
-            dpg.configure_item(self.status_text, color=(255, 100, 100))
-            
-            # Enable controls
-            dpg.configure_item(self.channel_combo, enabled=True)
-            dpg.configure_item(self.baudrate_combo, enabled=True)
-            if dpg.does_item_exist("device_type_combo"):
-                dpg.configure_item("device_type_combo", enabled=True)
+            if self.driver.disconnect():
+                self.is_connected = False
+                dpg.set_item_label(self.connect_button, "Connect")
+                dpg.set_value(self.status_text, "Disconnected")
+                dpg.configure_item(self.status_text, color=(255, 100, 100))
+                
+                # Enable controls
+                dpg.configure_item(self.channel_combo, enabled=True)
+                dpg.configure_item(self.baudrate_combo, enabled=True)
+                if dpg.does_item_exist("device_type_combo"):
+                    dpg.configure_item("device_type_combo", enabled=True)
+            else:
+                self._show_popup("Disconnect Failed", "Failed to properly disconnect from device.")
     
     # ============================================================================
     # CAN Explorer Methods
@@ -646,25 +588,39 @@ class PCANExplorerGUI:
         
         def file_selected(sender, app_data):
             file_path = app_data['file_path_name']
-            try:
-                self.dbc_database = cantools.database.load_file(file_path)
-                self.dbc_file_path = file_path
-                filename = os.path.basename(file_path)
-                dpg.set_value(self.dbc_status_text, f"Loaded: {filename}")
-                dpg.configure_item(self.dbc_status_text, color=(100, 255, 100))
-            except Exception as e:
-                self._show_popup("DBC Load Failed", f"Error: {str(e)}")
+            self._load_dbc_file_path(file_path)
         
         with dpg.file_dialog(directory_selector=False, show=True, callback=file_selected,
                            default_filename="*.dbc", width=700, height=400):
             dpg.add_file_extension(".dbc", color=(150, 255, 150, 255))
     
-    def _decode_message(self, can_id: int, data: bytes) -> Optional[str]:
+    def _load_dbc_file_path(self, file_path: str):
+        """Load a DBC file from a specific path."""
+        try:
+            # Load with strict=False to allow extended 29-bit CAN IDs without validation errors
+            self.dbc_database = cantools.database.load_file(file_path, strict=False)
+            self.dbc_file_path = file_path
+            filename = os.path.basename(file_path)
+            dpg.set_value(self.dbc_status_text, f"Loaded: {filename}")
+            dpg.configure_item(self.dbc_status_text, color=(100, 255, 100))
+            # Save config with new DBC path
+            self._save_config()
+        except Exception as e:
+            # Don't show popup during auto-load, just update status
+            dpg.set_value(self.dbc_status_text, f"Load failed: {filename if 'filename' in locals() else 'file'}")
+            dpg.configure_item(self.dbc_status_text, color=(255, 150, 100))
+            print(f"Warning: Could not load DBC file {file_path}: {e}")
+    
+    def _decode_message(self, can_id: int, data: bytes, is_extended: bool = False) -> Optional[str]:
         """Decode CAN message using DBC."""
         if not self.dbc_database:
             return None
         try:
-            message = self.dbc_database.get_message_by_frame_id(can_id)
+            # For extended IDs, add bit 31 to match DBC storage format
+            # DBC files store extended IDs with 0x80000000 flag set
+            lookup_id = can_id | 0x80000000 if is_extended else can_id
+            
+            message = self.dbc_database.get_message_by_frame_id(lookup_id)
             decoded = message.decode(data)
             signal_strs = []
             
@@ -707,25 +663,25 @@ class PCANExplorerGUI:
             
             return " | ".join(signal_strs)
         except Exception as e:
+            # Debug: print exception (remove after testing)
+            if is_extended and can_id == 0x18FF0000:
+                print(f"DEBUG: Decode failed for 0x{can_id:08X}: {type(e).__name__}: {str(e)}")
             # Return None if decode fails (message not in DBC or decode error)
             return None
     
-    def _get_message_name(self, can_id: int) -> Optional[str]:
+    def _get_message_name(self, can_id: int, is_extended: bool = False) -> Optional[str]:
         """Get message name from DBC."""
         if not self.dbc_database:
             return None
         try:
-            return self.dbc_database.get_message_by_frame_id(can_id).name
+            # For extended IDs, add bit 31 to match DBC storage format
+            lookup_id = can_id | 0x80000000 if is_extended else can_id
+            return self.dbc_database.get_message_by_frame_id(lookup_id).name
         except:
             return None
     
     def _on_message_received(self, msg):
         """Callback for received CAN messages."""
-        # Check if this is a flash response
-        if self.flash_in_progress and msg.id == CAN_BOOTLOADER_ID:
-            self.flash_response_data = msg.data
-            self.flash_response_event.set()
-        
         # Check if this is thermistor data and update display
         self._update_thermistor_data(msg.id, msg.data)
         
@@ -736,9 +692,9 @@ class PCANExplorerGUI:
         with self.message_lock:
             self.total_messages += 1
             current_time = datetime.now()
-            
-            decoded_signals = self._decode_message(msg.id, msg.data)
-            message_name = self._get_message_name(msg.id)
+
+            decoded_signals = self._decode_message(msg.id, msg.data, msg.is_extended)
+            message_name = self._get_message_name(msg.id, msg.is_extended)
             
             if msg.id in self.message_data:
                 data = self.message_data[msg.id]
@@ -875,55 +831,45 @@ class PCANExplorerGUI:
         # Use the existing DBC decoder to get signal values
         if not self.dbc_database:
             return
-        
+
         try:
-            # Decode the message using DBC
-            message = self.dbc_database.get_message_by_frame_id(can_id)
+            # For extended IDs, add bit 31 to match DBC storage format
+            lookup_id = can_id | 0x80000000 if True else can_id  # Assume all thermistor messages are extended
+            message = self.dbc_database.get_message_by_frame_id(lookup_id)
             decoded = message.decode(data)
             
             current_time = datetime.now().strftime("%H:%M:%S")
             
-            # Thermistor_Pair_0 (0x710/1808) - Channels 0 and 1
-            if can_id == 0x710:
-                if 'Temp_Ch0' in decoded:
-                    self._update_single_thermistor(0, decoded['Temp_Ch0'], current_time)
-                if 'Temp_Ch1' in decoded:
-                    self._update_single_thermistor(1, decoded['Temp_Ch1'], current_time)
-            
-            # Thermistor_Pair_1 (0x711/1809) - Channels 2 and 3
-            elif can_id == 0x711:
-                if 'Temp_Ch2' in decoded:
-                    self._update_single_thermistor(2, decoded['Temp_Ch2'], current_time)
-                if 'Temp_Ch3' in decoded:
-                    self._update_single_thermistor(3, decoded['Temp_Ch3'], current_time)
-            
-            # Thermistor_Pair_2 (0x712/1810) - Channels 4 and 5
-            elif can_id == 0x712:
-                if 'Temp_Ch4' in decoded:
-                    self._update_single_thermistor(4, decoded['Temp_Ch4'], current_time)
-                if 'Temp_Ch5' in decoded:
-                    self._update_single_thermistor(5, decoded['Temp_Ch5'], current_time)
-            
-            # Thermistor_Pair_3 (0x713/1811) - Channels 6 and 7
-            elif can_id == 0x713:
-                if 'Temp_Ch6' in decoded:
-                    self._update_single_thermistor(6, decoded['Temp_Ch6'], current_time)
-                if 'Temp_Ch7' in decoded:
-                    self._update_single_thermistor(7, decoded['Temp_Ch7'], current_time)
-            
-            # ADC_Raw_0_3 (0x720/1824) - Channels 0-3
-            elif can_id == 0x720:
+            # BMS_Temp_Msg_00 through BMS_Temp_Msg_13 (0x18FF0000 - 0x18FF000D)
+            # Each message has 4 thermistors: Temp_Therm_0 through Temp_Therm_3 for msg 0, etc.
+            # Calculate base channel from CAN ID
+            base_id = 0x18FF0000
+            if base_id <= can_id <= base_id + 13:
+                msg_num = can_id - base_id
+                base_channel = msg_num * 4
+                
+                # Update all 4 thermistors in this message
                 for i in range(4):
-                    adc_signal = f'ADC_Ch{i}'
-                    if adc_signal in decoded and i < len(self.thermistor_adc_tags):
-                        dpg.set_value(self.thermistor_adc_tags[i], f"{int(decoded[adc_signal])} counts")
+                    therm_num = base_channel + i
+                    signal_name = f'Temp_Therm_{therm_num}'
+                    
+                    if signal_name in decoded and therm_num < 56:
+                        self._update_single_thermistor(therm_num, decoded[signal_name], current_time)
             
-            # ADC_Raw_4_7 (0x721/1825) - Channels 4-7
-            elif can_id == 0x721:
+            # BMS_Temp_Raw_Msg_00 through BMS_Temp_Raw_Msg_13 (0x18FF0100 - 0x18FF010D)
+            # Each message has 4 ADC values
+            base_raw_id = 0x18FF0100
+            if base_raw_id <= can_id <= base_raw_id + 13:
+                msg_num = can_id - base_raw_id
+                base_channel = msg_num * 4
+                
+                # Update all 4 ADC values in this message
                 for i in range(4):
-                    adc_signal = f'ADC_Ch{i+4}'
-                    if adc_signal in decoded and (i+4) < len(self.thermistor_adc_tags):
-                        dpg.set_value(self.thermistor_adc_tags[i+4], f"{int(decoded[adc_signal])} counts")
+                    therm_num = base_channel + i
+                    signal_name = f'Raw_ADC_Therm_{therm_num}'
+                    
+                    if signal_name in decoded and therm_num < 56 and therm_num < len(self.thermistor_adc_tags):
+                        dpg.set_value(self.thermistor_adc_tags[therm_num], f"ADC:{int(decoded[signal_name])}")
             
         except Exception as e:
             # Message not in DBC or decode error - silently ignore
@@ -931,7 +877,7 @@ class PCANExplorerGUI:
     
     def _update_single_thermistor(self, channel: int, temp: float, time_str: str):
         """Update a single thermistor channel display."""
-        if channel >= 8:
+        if channel >= 56:
             return
         
         # Update stored value
@@ -940,9 +886,9 @@ class PCANExplorerGUI:
         # Update GUI
         if channel < len(self.thermistor_text_tags):
             temp_color = self._get_temp_color(temp)
-            dpg.set_value(self.thermistor_text_tags[channel], f"{temp:.1f} °C")
+            dpg.set_value(self.thermistor_text_tags[channel], f"{temp:.1f}°C")
             dpg.configure_item(self.thermistor_text_tags[channel], color=temp_color)
-            dpg.set_value(f"therm_time_{channel}", f"Last: {time_str}")
+            dpg.set_value(f"therm_time_{channel}", time_str)
         
         # Update statistics
         self._update_thermistor_stats()
@@ -977,28 +923,24 @@ class PCANExplorerGUI:
         valid_temps = [t for t in self.thermistor_temps if t is not None]
         
         if not valid_temps:
-            stats_text = "Active Channels: 0/8 | Min: --°C | Max: --°C | Avg: --°C"
+            stats_text = "Active: 0/56 | Min: --°C | Max: --°C | Avg: --°C"
         else:
             active = len(valid_temps)
             min_temp = min(valid_temps)
             max_temp = max(valid_temps)
             avg_temp = sum(valid_temps) / len(valid_temps)
-            stats_text = f"Active Channels: {active}/8 | Min: {min_temp:.1f}°C | Max: {max_temp:.1f}°C | Avg: {avg_temp:.1f}°C"
+            stats_text = f"Active: {active}/56 | Min: {min_temp:.1f}°C | Max: {max_temp:.1f}°C | Avg: {avg_temp:.1f}°C"
         
         dpg.set_value("therm_stats", stats_text)
     
     def _clear_thermistor_data(self):
         """Clear all thermistor data."""
-        self.thermistor_temps = [None] * 8
+        self.thermistor_temps = [None] * 56
         
-        for i in range(8):
+        for i in range(56):
             if i < len(self.thermistor_text_tags):
-                dpg.set_value(self.thermistor_text_tags[i], "---.-- °C")
+                dpg.set_value(self.thermistor_text_tags[i], "---.-°C")
                 dpg.configure_item(self.thermistor_text_tags[i], color=(100, 255, 100))
-                dpg.set_value(f"therm_time_{i}", "Last: Never")
-            
-            if i < len(self.thermistor_adc_tags):
-                dpg.set_value(self.thermistor_adc_tags[i], "---- counts")
         
         self._update_thermistor_stats()
     
@@ -1010,7 +952,7 @@ class PCANExplorerGUI:
             
             with open(filename, 'w') as f:
                 f.write("Channel,Temperature_degC,Status\n")
-                for i in range(8):
+                for i in range(56):
                     temp = self.thermistor_temps[i]
                     if temp is not None:
                         f.write(f"{i},{temp:.1f},Active\n")
@@ -1030,9 +972,9 @@ class PCANExplorerGUI:
         # Use the existing DBC decoder to get signal values
         if not self.dbc_database:
             return
-        
+
         try:
-            # Decode the message using DBC
+            # Decode the message using DBC - cantools auto-detects if extended
             message = self.dbc_database.get_message_by_frame_id(can_id)
             decoded = message.decode(data)
             
@@ -1205,244 +1147,6 @@ class PCANExplorerGUI:
             self._show_popup("Export Failed", f"Error: {str(e)}")
     
     # ============================================================================
-    # Firmware Flasher Methods
-    # ============================================================================
-    
-    def _select_firmware_file(self):
-        """Select firmware .bin file."""
-        def file_selected(sender, app_data):
-            file_path = app_data['file_path_name']
-            self.flash_firmware_path = file_path
-            filename = os.path.basename(file_path)
-            file_size = os.path.getsize(file_path)
-            dpg.set_value(self.flash_file_text, f"{filename} ({file_size} bytes)")
-            dpg.configure_item(self.flash_file_text, color=(100, 255, 100))
-            self._log_flash(f"Selected: {filename} ({file_size} bytes)")
-        
-        with dpg.file_dialog(directory_selector=False, show=True, callback=file_selected,
-                           default_filename="*.bin", width=700, height=400):
-            dpg.add_file_extension(".bin", color=(255, 150, 150, 255))
-    
-    def _log_flash(self, message: str):
-        """Add message to flash log."""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        log_entry = f"[{timestamp}] {message}"
-        self.flash_log.append(log_entry)
-        log_text = "\n".join(self.flash_log[-100:])  # Keep last 100 lines
-        dpg.set_value("flash_log_text", log_text)
-    
-    def _wait_for_response(self, timeout: float = RESPONSE_TIMEOUT) -> Optional[bytes]:
-        """Wait for bootloader response."""
-        self.flash_response_event.clear()
-        if self.flash_response_event.wait(timeout):
-            return self.flash_response_data
-        return None
-    
-    def _send_command(self, cmd: int, data: bytes = b'') -> bool:
-        """Send command to bootloader using 29-bit extended ID."""
-        msg_data = bytes([cmd]) + data
-        msg_data = msg_data + b'\x00' * (8 - len(msg_data))  # Pad to 8 bytes
-        return self.driver.send_message(CAN_HOST_ID, msg_data[:8], is_extended=True)
-    
-    def _send_command_list(self, cmd: int, data_list: list = []) -> bool:
-        """Send command to bootloader with data as list using 29-bit extended ID."""
-        msg_data = [cmd] + data_list
-        msg_data = msg_data + [0x00] * (8 - len(msg_data))  # Pad to 8 bytes
-        return self.driver.send_message(CAN_HOST_ID, bytes(msg_data[:8]), is_extended=True)
-    
-    def _flash_erase(self):
-        """Erase flash memory."""
-        if not self.is_connected:
-            self._show_popup("Not Connected", "Please connect to PCAN first.")
-            return
-        
-        threading.Thread(target=self._flash_erase_thread, daemon=True).start()
-    
-    def _flash_erase_thread(self):
-        """Erase flash thread."""
-        try:
-            self.flash_in_progress = True
-            dpg.set_value(self.flash_status_text, "Erasing flash...")
-            dpg.configure_item(self.flash_status_text, color=(255, 200, 100))
-            self._log_flash("Starting flash erase...")
-            
-            # Send erase command
-            if not self._send_command(CMD_ERASE_FLASH):
-                raise Exception("Failed to send erase command")
-            
-            # Wait for response
-            response = self._wait_for_response(ERASE_TIMEOUT)
-            if response and response[0] == RESP_ACK:
-                dpg.set_value(self.flash_status_text, "Erase complete!")
-                dpg.configure_item(self.flash_status_text, color=(100, 255, 100))
-                self._log_flash("✓ Flash erased successfully")
-            else:
-                raise Exception("Erase failed or timeout")
-                
-        except Exception as e:
-            dpg.set_value(self.flash_status_text, f"Error: {str(e)}")
-            dpg.configure_item(self.flash_status_text, color=(255, 100, 100))
-            self._log_flash(f"✗ Error: {str(e)}")
-        finally:
-            self.flash_in_progress = False
-    
-    def _flash_firmware(self):
-        """Flash firmware to device using Flash_Application.py script."""
-        if not self.is_connected:
-            self._show_popup("Not Connected", "Please connect to CAN device first.")
-            return
-        
-        if not self.flash_firmware_path:
-            self._show_popup("No File", "Please select a firmware file first.")
-            return
-        
-        threading.Thread(target=self._flash_firmware_thread, daemon=True).start()
-    
-    def _flash_firmware_thread(self):
-        """Flash firmware thread - wraps Flash_Application.py script."""
-        try:
-            self.flash_in_progress = True
-            dpg.set_value(self.flash_progress_bar, 0)
-            
-            # Determine device type and channel
-            device_arg = self.device_type
-            
-            # Get channel string
-            if self.device_type == 'pcan':
-                # Extract channel name from enum (e.g., "USB1" from PCANChannel.USB1)
-                channel_str = str(self.driver._channel).split('.')[-1] if hasattr(self.driver, '_channel') else 'USB1'
-            else:
-                # CANable uses device index
-                channel_str = str(self.driver._device_index) if hasattr(self.driver, '_device_index') else '0'
-            
-            # Build command to run Flash_Application.py
-            script_path = Path(__file__).parent / "Flash_Application.py"
-            cmd = [
-                sys.executable,
-                str(script_path),
-                self.flash_firmware_path,
-                "--device", device_arg,
-                "--channel", channel_str
-            ]
-            
-            self._log_flash(f"Starting flash process: {' '.join(cmd)}")
-            dpg.set_value(self.flash_status_text, "Initializing flash...")
-            dpg.configure_item(self.flash_status_text, color=(255, 200, 100))
-            
-            # Disconnect GUI's CAN connection temporarily to avoid conflicts
-            self._log_flash("Temporarily disconnecting GUI from CAN bus...")
-            was_connected = self.is_connected
-            if was_connected:
-                self.driver.disconnect()
-                self.is_connected = False
-                time.sleep(0.5)  # Give time for disconnect
-            
-            # Run the flash script and capture output
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                universal_newlines=True
-            )
-            
-            # Read output line by line
-            line_count = 0
-            for line in iter(process.stdout.readline, ''):
-                if line:
-                    line = line.strip()
-                    self._log_flash(line)
-                    line_count += 1
-                    
-                    # Parse progress from output if possible
-                    if "%" in line:
-                        try:
-                            # Try to extract percentage
-                            parts = line.split("%")
-                            if len(parts) > 0:
-                                percent_part = parts[0].split()[-1]
-                                progress = float(percent_part) / 100.0
-                                dpg.set_value(self.flash_progress_bar, progress)
-                                dpg.set_value(self.flash_status_text, f"Flashing: {percent_part}%")
-                        except:
-                            pass
-                    
-                    # Update status based on keywords
-                    if "Erasing" in line:
-                        dpg.set_value(self.flash_status_text, "Erasing flash...")
-                        dpg.configure_item(self.flash_status_text, color=(255, 200, 100))
-                    elif "Writing" in line:
-                        dpg.set_value(self.flash_status_text, "Writing firmware...")
-                        dpg.configure_item(self.flash_status_text, color=(100, 200, 255))
-                    elif "Verifying" in line:
-                        dpg.set_value(self.flash_status_text, "Verifying...")
-                        dpg.configure_item(self.flash_status_text, color=(255, 255, 100))
-            
-            # Wait for process to complete
-            return_code = process.wait()
-            
-            # Reconnect GUI to CAN bus
-            if was_connected:
-                time.sleep(1.0)  # Give flash script time to release CAN
-                self._log_flash("Reconnecting GUI to CAN bus...")
-                if self.device_type == 'pcan':
-                    self.driver.connect(self.driver._channel, self.driver._baudrate)
-                else:
-                    self.driver.connect(self.driver._device_index, self.driver._baudrate)
-                self.is_connected = True
-            
-            # Check result
-            if return_code == 0:
-                dpg.set_value(self.flash_progress_bar, 1.0)
-                dpg.set_value(self.flash_status_text, "Flash complete!")
-                dpg.configure_item(self.flash_status_text, color=(100, 255, 100))
-                self._log_flash("✓ Firmware flashed successfully!")
-            else:
-                dpg.set_value(self.flash_status_text, f"Flash failed (exit code {return_code})")
-                dpg.configure_item(self.flash_status_text, color=(255, 100, 100))
-                self._log_flash(f"✗ Flash process failed with exit code {return_code}")
-            
-        except Exception as e:
-            dpg.set_value(self.flash_status_text, f"Error: {str(e)}")
-            dpg.configure_item(self.flash_status_text, color=(255, 100, 100))
-            self._log_flash(f"✗ Error: {str(e)}")
-            
-            # Try to reconnect if we were connected
-            try:
-                if was_connected and not self.is_connected:
-                    if self.device_type == 'pcan':
-                        self.driver.connect(self.driver._channel, self.driver._baudrate)
-                    else:
-                        self.driver.connect(self.driver._device_index, self.driver._baudrate)
-                    self.is_connected = True
-            except:
-                pass
-                
-        finally:
-            self.flash_in_progress = False
-    
-    def _flash_verify(self):
-        """Verify flashed firmware."""
-        self._show_popup("Verify", "Verify feature coming soon...")
-    
-    def _flash_jump(self):
-        """Jump to application."""
-        if not self.is_connected:
-            self._show_popup("Not Connected", "Please connect first.")
-            return
-        
-        try:
-            self.flash_in_progress = True
-            self._send_command(CMD_JUMP_TO_APP)
-            self._log_flash("Jump to application command sent")
-            time.sleep(0.5)
-            self.flash_in_progress = False
-        except Exception as e:
-            self._log_flash(f"Error: {str(e)}")
-            self.flash_in_progress = False
-    
-    # ============================================================================
     # Utility Methods
     # ============================================================================
     
@@ -1475,7 +1179,7 @@ class PCANExplorerGUI:
 def main():
     """Main entry point with command-line argument support."""
     parser = argparse.ArgumentParser(
-        description='PythonCAN GUI Explorer with Firmware Flasher',
+        description='PythonCAN GUI Explorer',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 Examples:

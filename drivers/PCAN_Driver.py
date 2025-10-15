@@ -241,15 +241,24 @@ class PCANDriver:
             return False
         
         try:
+            # First, set flag to signal we're disconnecting
+            self._is_connected = False
+            
             # Stop receive thread if running
             self.stop_receive_thread()
             
-            # Shutdown bus
-            if self._bus:
-                self._bus.shutdown()
-                self._bus = None
+            # Small delay to ensure thread has fully stopped
+            time.sleep(0.1)
             
-            self._is_connected = False
+            # Now safely shutdown bus
+            if self._bus:
+                try:
+                    self._bus.shutdown()
+                except Exception as e:
+                    print(f"Warning during bus shutdown: {str(e)}")
+                finally:
+                    self._bus = None
+            
             self._channel = None
             self._baudrate = None
             
@@ -258,6 +267,9 @@ class PCANDriver:
             
         except Exception as e:
             print(f"✗ Failed to disconnect: {str(e)}")
+            # Even if there's an error, try to clean up
+            self._is_connected = False
+            self._bus = None
             return False
     
     def send_message(self, can_id: int, data: bytes, 

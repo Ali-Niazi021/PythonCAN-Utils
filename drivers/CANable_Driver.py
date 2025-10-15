@@ -202,6 +202,22 @@ class CANableDriver:
         
         return available_devices
     
+    def _force_cleanup(self):
+        """Force cleanup of any lingering resources. Internal use only."""
+        try:
+            if self._bus:
+                try:
+                    self._bus.shutdown()
+                except:
+                    pass
+                self._bus = None
+            
+            import gc
+            gc.collect()
+            time.sleep(0.5)
+        except:
+            pass
+    
     def connect(self, channel: int, baudrate: CANableBaudRate, 
                 fd_mode: bool = False) -> bool:
         """
@@ -220,19 +236,56 @@ class CANableDriver:
             print("Already connected to a CANable device. Disconnect first.")
             return False
         
+        # Ensure any previous connection is fully cleaned up
+        self._force_cleanup()
+        
         try:
             # Get bitrate value
             bitrate = baudrate.value
             
-            # Create bus instance using gs_usb interface (Candle API)
-            # This provides direct USB access to CANable with candleLight firmware
-            self._bus = Bus(
-                interface='gs_usb',
-                channel=channel,  # Device index (0, 1, 2, ...)
-                bitrate=bitrate,
-                fd=fd_mode,
-                data_bitrate=bitrate if fd_mode else None
-            )
+            # Try to connect with retry logic for "Access denied" errors
+            # This handles cases where USB device is still being released by OS
+            max_retries = 3
+            retry_delay = 1.5
+            last_error = None
+            
+            for attempt in range(max_retries):
+                try:
+                    # Create bus instance using gs_usb interface (Candle API)
+                    # This provides direct USB access to CANable with candleLight firmware
+                    self._bus = Bus(
+                        interface='gs_usb',
+                        channel=channel,  # Device index (0, 1, 2, ...)
+                        bitrate=bitrate,
+                        fd=fd_mode,
+                        data_bitrate=bitrate if fd_mode else None
+                    )
+                    # If we get here, connection succeeded
+                    break
+                    
+                except Exception as e:
+                    last_error = e
+                    error_str = str(e).lower()
+                    
+                    # Check if it's an "access denied" or "device busy" error
+                    if ('errno 13' in error_str or 
+                        'access denied' in error_str or 
+                        'insufficient permissions' in error_str or
+                        'device busy' in error_str or
+                        'resource busy' in error_str):
+                        
+                        if attempt < max_retries - 1:
+                            print(f"⚠ Device busy, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})")
+                            time.sleep(retry_delay)
+                            # Try force cleanup again before retry
+                            import gc
+                            gc.collect()
+                        else:
+                            # Last attempt failed
+                            raise
+                    else:
+                        # Different error, don't retry
+                        raise
             
             self._channel = channel
             self._baudrate = baudrate
@@ -272,23 +325,91 @@ class CANableDriver:
             return False
         
         try:
-            # Stop receive thread if running
+            # First, set flag to signal we're disconnecting
+            self._is_connected = False
+            
+            # Stop receive thread if running (this sets _stop_receive = True)
             self.stop_receive_thread()
             
-            # Shutdown bus
-            if self._bus:
-                self._bus.shutdown()
-                self._bus = None
+            # Give extra time for thread to fully stop and release resources
+            time.sleep(0.3)
             
-            self._is_connected = False
+            # Now safely shutdown bus
+            if self._bus:
+                try:
+                    # Workaround for python-can gs_usb double-shutdown bug
+                    # We need to manually close the USB device and prevent the destructor from trying again
+                    
+                    # First, try to stop the device and close USB handle
+                    if hasattr(self._bus, 'gs_usb') and self._bus.gs_usb:
+                        try:
+                            # Stop the device
+                            if hasattr(self._bus.gs_usb, 'stop'):
+                                self._bus.gs_usb.stop()
+                            
+                            # Close the USB device handle
+                            if hasattr(self._bus.gs_usb, 'gs_usb'):
+                                usb_dev = self._bus.gs_usb.gs_usb
+                                if hasattr(usb_dev, '_ctx') and usb_dev._ctx:
+                                    try:
+                                        if hasattr(usb_dev._ctx, 'managed_close'):
+                                            usb_dev._ctx.managed_close()
+                                        elif hasattr(usb_dev._ctx, 'handle'):
+                                            usb_dev._ctx.handle = None
+                                    except:
+                                        pass
+                                
+                                # Mark as already closed
+                                if hasattr(usb_dev, '_ctx'):
+                                    usb_dev._ctx = None
+                        except Exception as e:
+                            # Ignore errors - we're shutting down anyway
+                            pass
+                    
+                    # Now call regular shutdown (which might fail but that's okay)
+                    try:
+                        self._bus.shutdown()
+                    except:
+                        pass  # Ignore shutdown errors
+                    
+                    print("✓ Bus shutdown complete")
+                    
+                except Exception as e:
+                    # Ignore all shutdown errors - we're cleaning up anyway
+                    print(f"⚠ Note: {str(e)}")
+                finally:
+                    self._bus = None
+                    
+                    # Force garbage collection to ensure all references are released
+                    import gc
+                    gc.collect()
+            
+            # Additional delay to ensure USB device is fully released by OS/libusb
+            # This is critical for gs_usb/libusb to properly release the device
+            # Windows can be slow to release USB handles
+            time.sleep(1.0)
+            
             self._channel = None
             self._baudrate = None
+            self._device_info = None
             
             print("✓ Disconnected from CANable device")
             return True
             
         except Exception as e:
             print(f"✗ Failed to disconnect: {str(e)}")
+            # Even if there's an error, try to clean up
+            self._is_connected = False
+            self._bus = None
+            self._channel = None
+            self._baudrate = None
+            self._device_info = None
+            
+            # Force cleanup even on error
+            import gc
+            gc.collect()
+            time.sleep(1.0)
+            
             return False
     
     def send_message(self, can_id: int, data: bytes, 
@@ -306,7 +427,7 @@ class CANableDriver:
         Returns:
             True if message sent successfully, False otherwise.
         """
-        if not self._is_connected:
+        if not self._is_connected or self._bus is None:
             print("✗ Not connected to CANable device")
             return False
         
@@ -322,7 +443,9 @@ class CANableDriver:
             return True
             
         except Exception as e:
-            print(f"✗ Failed to send message: {str(e)}")
+            # Only print error if we're still supposed to be connected
+            if self._is_connected:
+                print(f"✗ Failed to send message: {str(e)}")
             return False
     
     def read_message(self, timeout: float = 1.0) -> Optional[CANMessage]:
@@ -335,8 +458,7 @@ class CANableDriver:
         Returns:
             CANMessage object if message received, None otherwise.
         """
-        if not self._is_connected:
-            print("✗ Not connected to CANable device")
+        if not self._is_connected or self._bus is None:
             return None
         
         try:
@@ -357,7 +479,9 @@ class CANableDriver:
             )
             
         except Exception as e:
-            print(f"✗ Failed to read message: {str(e)}")
+            # Only print error if we're still supposed to be connected
+            if self._is_connected:
+                print(f"✗ Failed to read message: {str(e)}")
             return None
     
     def start_receive_thread(self, callback: Callable[[CANMessage], None]) -> bool:
@@ -401,7 +525,14 @@ class CANableDriver:
             return False
         
         self._stop_receive = True
-        self._receive_thread.join(timeout=2.0)
+        
+        # Wait for thread to finish with extended timeout
+        self._receive_thread.join(timeout=3.0)
+        
+        # Check if thread actually stopped
+        if self._receive_thread.is_alive():
+            print("⚠ Warning: Receive thread did not stop cleanly")
+        
         self._receive_thread = None
         self._receive_callback = None
         
@@ -416,8 +547,11 @@ class CANableDriver:
                 if msg and self._receive_callback:
                     self._receive_callback(msg)
             except Exception as e:
-                if not self._stop_receive:
+                # Ignore errors when stopping or disconnecting
+                if not self._stop_receive and self._is_connected:
                     print(f"Error in receive loop: {str(e)}")
+                # Exit loop on errors
+                break
     
     def get_bus_status(self) -> dict:
         """
