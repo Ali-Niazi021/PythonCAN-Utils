@@ -58,20 +58,31 @@ class PCANExplorerGUI:
     # Configuration file path
     CONFIG_FILE = Path.home() / ".pythoncan_gui_config.json"
     
-    def __init__(self, device_type: str = 'pcan', channel: Union[str, 'PCANChannel'] = None):
+    def __init__(self, device_type: str = None, channel: Union[str, 'PCANChannel'] = None):
         """Initialize the GUI application.
         
         Args:
-            device_type: 'pcan' or 'canable'
-            channel: Default channel/port to use
+            device_type: 'pcan' or 'canable' (None = use config)
+            channel: Default channel/port to use (None = use config)
         """
         # Load saved configuration
         config = self._load_config_static()
         self.config = config
         
-        # Override with command line args if provided, otherwise use saved config
-        self.device_type = device_type.lower() if device_type else config.get('device_type', 'pcan')
-        self.default_channel = channel if channel is not None else config.get('channel')
+        # Priority: command line args > config > defaults
+        if device_type is not None:
+            self.device_type = device_type.lower()
+            print(f"Using device_type from command line: {self.device_type}")
+        else:
+            self.device_type = config.get('device_type', 'pcan')
+            print(f"Using device_type from config: {self.device_type} (config: {config})")
+        
+        if channel is not None:
+            self.default_channel = channel
+            print(f"Using channel from command line: {self.default_channel}")
+        else:
+            self.default_channel = config.get('channel')
+            print(f"Using channel from config: {self.default_channel}")
         
         # Create appropriate driver
         if self.device_type == 'pcan':
@@ -89,6 +100,17 @@ class PCANExplorerGUI:
         self.message_data: Dict[int, dict] = {}
         self.message_lock = threading.Lock()
         
+        # Track expanded rows for signal display
+        self.expanded_rows: set = set()
+        
+        # Send messages table data
+        self.send_messages: list = []  # List of messages to send
+        self.send_messages_lock = threading.Lock()
+        self.selected_send_row = None
+        
+        # GUI initialization state
+        self.gui_initializing = True  # Flag to prevent saving during initialization
+        
         # DBC database support
         self.dbc_database: Optional[cantools.database.Database] = None if DBC_SUPPORT else None
         self.dbc_file_path: Optional[str] = None
@@ -102,15 +124,15 @@ class PCANExplorerGUI:
         self.stats_text = None
         self.dbc_status_text = None
         
-        # Thermistor monitoring
-        self.thermistor_temps = [None] * 56  # Store latest temps for channels 0-55
-        self.thermistor_text_tags = []  # GUI text element tags
-        self.thermistor_adc_tags = []   # ADC value text tags
+        # Thermistor monitoring - 6 modules × 56 thermistors = 336 total
+        self.thermistor_temps = [[None] * 56 for _ in range(6)]  # [module][channel]
+        self.thermistor_text_tags = [[None] * 56 for _ in range(6)]  # GUI text element tags per module
+        self.current_thermistor_module = 0  # Currently displayed module (0-5)
         
-        # Cell voltage monitoring (BQ76952)
-        self.cell_voltages = [None] * 16  # Store latest voltages for cells 1-16 (in mV)
+        # Cell voltage monitoring - 6 modules × 18 cells = 108 total
+        self.cell_voltages = [[None] * 18 for _ in range(6)]  # [module][cell] - Store latest voltages (in mV)
         self.stack_voltage = None  # Total stack voltage (in mV)
-        self.cell_voltage_text_tags = []  # GUI text element tags for individual cells
+        self.cell_voltage_text_tags = [[None] * 18 for _ in range(6)]  # GUI text element tags per module
         
         # Statistics
         self.total_messages = 0
@@ -135,14 +157,18 @@ class PCANExplorerGUI:
     def _save_config(self):
         """Save current configuration to JSON file."""
         try:
+            # Get current channel value from combo box
+            channel_value = dpg.get_value(self.channel_combo) if self.channel_combo else None
+            
             config = {
                 'device_type': self.device_type,
-                'channel': self._get_channel_string(),
+                'channel': channel_value,
                 'baudrate': dpg.get_value(self.baudrate_combo) if self.baudrate_combo else 'BAUD_500K',
                 'dbc_file': self.dbc_file_path
             }
             with open(self.CONFIG_FILE, 'w') as f:
                 json.dump(config, f, indent=2)
+            print(f"Config saved: {config}")
         except Exception as e:
             print(f"Warning: Could not save config: {e}")
     
@@ -160,6 +186,75 @@ class PCANExplorerGUI:
         """Set up the DearPyGUI interface with tabs."""
         dpg.create_context()
         
+        # Set up modern color theme with vibrant gradients
+        with dpg.theme() as global_theme:
+            with dpg.theme_component(dpg.mvAll):
+                # Modern dark theme with cyan/purple gradient accents
+                dpg.add_theme_color(dpg.mvThemeCol_WindowBg, (18, 18, 24, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_ChildBg, (24, 24, 32, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_Border, (80, 70, 120, 180))
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBg, (35, 35, 48, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBgHovered, (50, 50, 68, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBgActive, (65, 60, 85, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_TitleBg, (25, 25, 40, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_TitleBgActive, (40, 35, 60, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_TitleBgCollapsed, (20, 20, 35, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_MenuBarBg, (25, 25, 40, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_ScrollbarBg, (24, 24, 32, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_ScrollbarGrab, (100, 80, 140, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_ScrollbarGrabHovered, (120, 100, 160, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_ScrollbarGrabActive, (140, 120, 180, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_CheckMark, (100, 200, 255, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_SliderGrab, (100, 180, 255, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_SliderGrabActive, (120, 200, 255, 255))
+                # Vibrant gradient buttons (cyan to purple)
+                dpg.add_theme_color(dpg.mvThemeCol_Button, (70, 100, 180, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (90, 130, 220, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (110, 150, 240, 255))
+                # Headers with purple tint
+                dpg.add_theme_color(dpg.mvThemeCol_Header, (80, 60, 140, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_HeaderHovered, (100, 80, 170, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_HeaderActive, (120, 100, 190, 255))
+                # Separators with gradient feel
+                dpg.add_theme_color(dpg.mvThemeCol_Separator, (90, 80, 130, 200))
+                dpg.add_theme_color(dpg.mvThemeCol_SeparatorHovered, (120, 100, 160, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_SeparatorActive, (140, 120, 180, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_ResizeGrip, (80, 100, 180, 200))
+                dpg.add_theme_color(dpg.mvThemeCol_ResizeGripHovered, (100, 130, 220, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_ResizeGripActive, (120, 150, 240, 255))
+                # Tabs with gradient colors
+                dpg.add_theme_color(dpg.mvThemeCol_Tab, (50, 50, 85, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_TabHovered, (90, 120, 200, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_TabActive, (70, 100, 180, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_TabUnfocused, (35, 35, 60, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_TabUnfocusedActive, (50, 50, 85, 255))
+                # Table colors with better contrast
+                dpg.add_theme_color(dpg.mvThemeCol_TableHeaderBg, (45, 45, 75, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_TableBorderStrong, (90, 80, 130, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_TableBorderLight, (60, 55, 85, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_TableRowBg, (0, 0, 0, 0))
+                dpg.add_theme_color(dpg.mvThemeCol_TableRowBgAlt, (100, 90, 140, 15))
+                # Text colors with better readability
+                dpg.add_theme_color(dpg.mvThemeCol_Text, (240, 240, 250, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_TextDisabled, (140, 140, 160, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_PopupBg, (30, 30, 48, 245))
+                
+                # Enhanced style adjustments for modern look
+                dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 8)
+                dpg.add_theme_style(dpg.mvStyleVar_WindowRounding, 10)
+                dpg.add_theme_style(dpg.mvStyleVar_ChildRounding, 8)
+                dpg.add_theme_style(dpg.mvStyleVar_FramePadding, 10, 8)
+                dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 10, 8)
+                dpg.add_theme_style(dpg.mvStyleVar_IndentSpacing, 22)
+                dpg.add_theme_style(dpg.mvStyleVar_ScrollbarSize, 16)
+                dpg.add_theme_style(dpg.mvStyleVar_ScrollbarRounding, 8)
+                dpg.add_theme_style(dpg.mvStyleVar_GrabMinSize, 14)
+                dpg.add_theme_style(dpg.mvStyleVar_GrabRounding, 6)
+                dpg.add_theme_style(dpg.mvStyleVar_TabRounding, 6)
+                dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, 12, 12)
+        
+        dpg.bind_theme(global_theme)
+        
         # Set up fonts
         with dpg.font_registry():
             default_font = dpg.add_font("C:\\Windows\\Fonts\\segoeui.ttf", 16)
@@ -171,7 +266,7 @@ class PCANExplorerGUI:
             
             # Connection Panel (always visible)
             with dpg.group(horizontal=True):
-                dpg.add_text("Connection Settings", color=(100, 200, 255))
+                dpg.add_text("Connection Settings", color=(140, 200, 255))  # Vibrant cyan-blue for headers
             
             dpg.add_separator()
             
@@ -252,7 +347,7 @@ class PCANExplorerGUI:
                 )
                 
                 dpg.add_text(" ")
-                self.status_text = dpg.add_text("Disconnected", color=(255, 100, 100))
+                self.status_text = dpg.add_text("Disconnected", color=(255, 100, 120))  # Vibrant coral-red for disconnected
             
             dpg.add_separator()
             
@@ -287,6 +382,9 @@ class PCANExplorerGUI:
         
         # Auto-load saved DBC file if it exists
         self._auto_load_dbc()
+        
+        # GUI initialization complete - now allow saving config on changes
+        self.gui_initializing = False
     
     def _auto_load_dbc(self):
         """Automatically load the last used DBC file if it exists."""
@@ -302,182 +400,193 @@ class PCANExplorerGUI:
                 print(f"Could not auto-load DBC file: {e}")
     
     def _setup_explorer_tab(self):
-        """Setup the CAN Explorer tab content."""
-        # DBC Status
+        """Setup the CAN Explorer tab content with Send and Receive sections."""
+        # DBC Status at top
         with dpg.group(horizontal=True):
             dpg.add_text("DBC File:")
-            self.dbc_status_text = dpg.add_text("No DBC loaded", color=(200, 200, 100))
+            self.dbc_status_text = dpg.add_text("No DBC loaded", color=(255, 200, 100))
             dpg.add_text("  ")
             dpg.add_button(label="Load DBC", callback=self._load_dbc_file, width=100, height=25)
         
         dpg.add_separator()
         
-        # Send Message Panel
-        with dpg.collapsing_header(label="Send CAN Message", default_open=True):
-            with dpg.group(horizontal=True):
-                dpg.add_text("ID (Hex):")
-                dpg.add_input_text(tag="can_id_input", default_value="123", width=90)
-                
-                dpg.add_text(" Data (Hex):")
-                dpg.add_input_text(tag="data_input", default_value="01 02 03 04", width=220)
-                
-                dpg.add_checkbox(label="Ext", tag="extended_checkbox", default_value=False)
-                dpg.add_checkbox(label="RTR", tag="remote_checkbox", default_value=False)
-                
-                dpg.add_button(label="Send", callback=self._send_message, width=80, height=28)
+        # Send section as collapsing header
+        with dpg.collapsing_header(label="Send CAN Messages", default_open=False):
+            self._setup_send_section()
         
         dpg.add_separator()
         
+        # Receive section as collapsing header
+        with dpg.collapsing_header(label="Receive CAN Messages", default_open=True):
+            self._setup_receive_section()
+    
+    def _setup_send_section(self):
+        """Setup the Send CAN Messages section."""
+        dpg.add_text("CAN Message Transmitter", color=(140, 200, 255))
+        dpg.add_text("Select a message from the list and use the buttons to send, edit, or remove it.", 
+                    color=(180, 190, 220))
+        dpg.add_spacing(count=1)
+        
+        # Controls
+        with dpg.group(horizontal=True):
+            dpg.add_button(label="Add from DBC", callback=self._show_add_dbc_message_dialog, width=120, height=30)
+            dpg.add_button(label="Add Custom", callback=self._show_add_custom_message_dialog, width=120, height=30)
+            dpg.add_button(label="Send Selected", callback=self._send_selected_message, width=120, height=30)
+            dpg.add_button(label="Edit Selected", callback=self._edit_send_message, width=120, height=30)
+            dpg.add_button(label="Remove Selected", callback=self._remove_send_message, width=130, height=30)
+            dpg.add_button(label="Clear All", callback=self._clear_send_messages, width=100, height=30)
+        
+        dpg.add_separator()
+        
+        # Send Messages List and Details
+        with dpg.group(horizontal=True):
+            # Left side: Message list
+            with dpg.child_window(border=True, width=400, height=250):
+                dpg.add_text("Message Library:", color=(140, 200, 255))
+                dpg.add_listbox(
+                    tag="send_messages_listbox",
+                    items=[],
+                    num_items=10,
+                    callback=self._on_send_message_selected,
+                    width=-1
+                )
+            
+            # Right side: Message details
+            with dpg.child_window(border=True, width=-1, height=250):
+                dpg.add_text("Message Details:", color=(140, 200, 255))
+                dpg.add_separator()
+                with dpg.group(tag="send_message_details"):
+                    dpg.add_text("No message selected", color=(180, 190, 220))
+    
+    def _setup_receive_section(self):
+        """Setup the Receive CAN Messages section."""
         # Statistics
         with dpg.group(horizontal=True):
-            dpg.add_text("Statistics:", color=(100, 255, 100))
+            dpg.add_text("Statistics:", color=(100, 255, 200))
             self.stats_text = dpg.add_text("Total: 0 | Unique IDs: 0 | Rate: 0 msg/s")
         
         dpg.add_separator()
         
         # Message Table Controls
         with dpg.group(horizontal=True):
-            dpg.add_text("Received Messages", color=(100, 200, 255))
+            dpg.add_text("Received Messages", color=(140, 200, 255))
             dpg.add_text("     ")
             dpg.add_button(label="Clear", callback=self._clear_messages, width=80, height=25)
-            dpg.add_button(label="Export CSV", callback=self._export_messages, width=100, height=25)
         
-        # Message Table
-        with dpg.table(
-            tag="message_table",
-            header_row=True,
-            resizable=True,
-            policy=dpg.mvTable_SizingStretchProp,
-            borders_outerH=True,
-            borders_innerV=True,
-            borders_innerH=True,
-            borders_outerV=True,
-            scrollY=True,
-            height=500
-        ):
-            dpg.add_table_column(label="CAN ID", width_fixed=True, init_width_or_weight=90)
-            dpg.add_table_column(label="Name", width_fixed=True, init_width_or_weight=110)
-            dpg.add_table_column(label="Type", width_fixed=True, init_width_or_weight=50)
-            dpg.add_table_column(label="DLC", width_fixed=True, init_width_or_weight=45)
-            dpg.add_table_column(label="Data", width_fixed=True, init_width_or_weight=200)
-            dpg.add_table_column(label="Decoded Signals", width_fixed=False, init_width_or_weight=250)
-            dpg.add_table_column(label="Count", width_fixed=True, init_width_or_weight=60)
-            dpg.add_table_column(label="Last RX", width_fixed=True, init_width_or_weight=110)
-            dpg.add_table_column(label="Period", width_fixed=True, init_width_or_weight=70)
+        dpg.add_spacing(count=1)
+        
+        # Message Table (dynamic height - fills remaining space)
+        with dpg.child_window(border=True, autosize_x=True, autosize_y=True):
+            with dpg.table(
+                tag="message_table",
+                header_row=True,
+                resizable=True,
+                policy=dpg.mvTable_SizingStretchProp,
+                borders_outerH=True,
+                borders_innerV=True,
+                borders_innerH=True,
+                borders_outerV=True,
+                scrollY=True
+            ):
+                dpg.add_table_column(label="CAN ID", width_fixed=True, init_width_or_weight=90)
+                dpg.add_table_column(label="Name", width_fixed=True, init_width_or_weight=110)
+                dpg.add_table_column(label="Type", width_fixed=True, init_width_or_weight=50)
+                dpg.add_table_column(label="DLC", width_fixed=True, init_width_or_weight=45)
+                dpg.add_table_column(label="Data", width_fixed=True, init_width_or_weight=200)
+                dpg.add_table_column(label="Decoded Signals", width_fixed=False, init_width_or_weight=250)
+                dpg.add_table_column(label="Count", width_fixed=True, init_width_or_weight=60)
+                dpg.add_table_column(label="Last RX", width_fixed=True, init_width_or_weight=110)
+                dpg.add_table_column(label="Period", width_fixed=True, init_width_or_weight=70)
+                dpg.add_table_column(label="Last RX", width_fixed=True, init_width_or_weight=110)
+                dpg.add_table_column(label="Period", width_fixed=True, init_width_or_weight=70)
     
     def _setup_thermistor_tab(self):
-        """Setup the Thermistor Monitor tab content."""
-        dpg.add_text("56-Channel Thermistor Temperature Monitor", color=(100, 255, 200))
-        dpg.add_text("Real-time temperature readings from all 56 thermistor channels (0.1°C resolution)", color=(150, 150, 150))
+        """Setup the Thermistor Monitor tab content - 336 thermistors (6 modules × 56)."""
+        dpg.add_text("336-Channel Multi-Module Thermistor Monitor (All Modules)", color=(140, 220, 255))
+        dpg.add_text("Real-time temperature readings from 6 BMS modules, 56 channels each (0.1°C resolution)", 
+                    color=(160, 170, 180))
         dpg.add_separator()
         
-        # Statistics and controls at top
+        # Global statistics
         with dpg.group(horizontal=True):
-            dpg.add_text("Statistics:", color=(100, 200, 255))
-            dpg.add_text("Active: 0/56 | Min: --°C | Max: --°C | Avg: --°C", 
-                        tag="therm_stats", color=(200, 200, 200))
+            dpg.add_text("Global Stats:", color=(140, 200, 255))
+            dpg.add_text("All Modules | Active: 0/336 | Min: --°C | Max: --°C | Avg: --°C", 
+                        tag="therm_global_stats", color=(200, 210, 230))
         
+        # Controls
         with dpg.group(horizontal=True):
-            dpg.add_button(label="Clear History", callback=self._clear_thermistor_data, width=120, height=25)
-            dpg.add_button(label="Export CSV", callback=self._export_thermistor_data, width=120, height=25)
+            dpg.add_button(label="Clear All Data", callback=self._clear_thermistor_data, width=120, height=25)
         
         dpg.add_separator()
         dpg.add_spacing(count=1)
         
-        # Temperature Display Grid in scrollable window
-        # Create 8 rows × 7 columns = 56 channels (very dense layout)
-        with dpg.child_window(border=True, height=650):
-            for row in range(8):
-                with dpg.group(horizontal=True):
-                    for col in range(7):
-                        channel = row * 7 + col
-                        if channel >= 56:
-                            break
-                        
-                        with dpg.child_window(width=170, height=50, border=True):
-                            with dpg.group(horizontal=True):
-                                dpg.add_text(f"{channel}:", color=(200, 200, 200))
-                                temp_tag = f"therm_temp_{channel}"
-                                dpg.add_text("---.-°C", tag=temp_tag, color=(100, 255, 100))
-                                self.thermistor_text_tags.append(temp_tag)
-                            
-                            # Hidden tags for ADC (for compatibility, not displayed)
-                            adc_tag = f"therm_adc_{channel}"
-                            dpg.add_text("", tag=adc_tag, show=False)
-                            self.thermistor_adc_tags.append(adc_tag)
-                            
-                            # Hidden tag for time (for compatibility, not displayed)
-                            dpg.add_text("", tag=f"therm_time_{channel}", show=False)
+        # Temperature Display Grid - ALL 336 thermistors (6 modules)
+        # Compact layout: 14 columns (2 per module) × 56 rows
+        with dpg.child_window(border=True, autosize_x=True, autosize_y=True, tag="therm_display_container"):
+            self._create_all_thermistors_grid()
         
         dpg.add_separator()
-        dpg.add_text("Note: Temperature data from CAN messages 0x18FF0000-0x18FF000D (BMS_Temp_Msg_00 through BMS_Temp_Msg_13)", 
-                    color=(150, 150, 150), wrap=1150)
+        dpg.add_text("Note: Module IDs extracted from bits 15-12 of CAN ID (0x08F0X0YZ format)", 
+                    color=(160, 170, 180), wrap=1150)
     
     def _setup_cell_voltage_tab(self):
         """Setup the Cell Voltage Monitor tab content."""
-        dpg.add_text("BQ76952 Battery Cell Voltage Monitor", color=(100, 255, 200))
-        dpg.add_text("Real-time voltage monitoring for 16-cell battery pack (1mV resolution)", color=(150, 150, 150))
+        dpg.add_text("108-Cell Multi-Module Battery Voltage Monitor (All Modules)", color=(140, 220, 255))
+        dpg.add_text("Real-time voltage monitoring for 6 modules × 18 cells = 108 total cells (1mV resolution)", 
+                    color=(180, 190, 220))
         dpg.add_separator()
         
-        # Stack voltage display
-        with dpg.group():
-            dpg.add_text("Total Stack Voltage:", color=(255, 200, 100))
-            dpg.add_spacing(count=1)
-            with dpg.group(horizontal=True):
-                dpg.add_text("  Stack:", color=(180, 180, 180))
-                dpg.add_text("---.--- V", tag="stack_voltage_display", color=(255, 255, 100))
-                dpg.add_text("  (------- mV)", tag="stack_voltage_mv_display", color=(200, 200, 200))
-        
-        dpg.add_separator()
-        dpg.add_spacing(count=2)
-        
-        # Cell voltage display grid (4x4 grid for 16 cells)
-        dpg.add_text("Individual Cell Voltages:", color=(200, 200, 255))
-        dpg.add_spacing(count=2)
-        
-        # Create 4x4 grid for 16 cells
-        for row in range(4):
-            with dpg.group(horizontal=True):
-                for col in range(4):
-                    cell_num = row * 4 + col + 1  # Cells numbered 1-16
-                    
-                    with dpg.child_window(width=290, height=110, border=True):
-                        dpg.add_text(f"Cell {cell_num}", color=(100, 200, 255))
-                        dpg.add_separator()
-                        
-                        # Voltage value (large text)
-                        with dpg.group(horizontal=True):
-                            dpg.add_text("Voltage:", color=(180, 180, 180))
-                            voltage_tag = f"cell_voltage_{cell_num}"
-                            dpg.add_text("-.---- V", tag=voltage_tag, color=(100, 255, 100))
-                            self.cell_voltage_text_tags.append(voltage_tag)
-                        
-                        # mV display
-                        dpg.add_text("---- mV", tag=f"cell_mv_{cell_num}", color=(150, 150, 255))
-                        
-                        # Last update time
-                        dpg.add_text("Last: Never", tag=f"cell_time_{cell_num}", color=(150, 150, 150))
-        
-        dpg.add_separator()
-        dpg.add_spacing(count=2)
-        
-        # Statistics
+        # Global statistics
         with dpg.group(horizontal=True):
-            dpg.add_text("Cell Statistics:", color=(100, 200, 255))
-            dpg.add_text("Active: 0/16 | Min: -.--- V | Max: -.--- V | Avg: -.--- V | Delta: -.--- V", 
-                        tag="cell_stats", color=(200, 200, 200))
+            dpg.add_text("Global Stats:", color=(140, 200, 255))
+            dpg.add_text("Active: 0/108 | Stack: ---.--- V | Min: -.--- V | Max: -.--- V | Avg: -.--- V | Delta: -.--- V", 
+                        tag="cell_stats", color=(220, 220, 255))
         
-        dpg.add_spacing(count=2)
-        
-        # Control buttons
+        # Controls
         with dpg.group(horizontal=True):
-            dpg.add_button(label="Clear History", callback=self._clear_cell_voltage_data, width=120, height=30)
-            dpg.add_button(label="Export Cell Voltages CSV", callback=self._export_cell_voltage_data, width=180, height=30)
-            dpg.add_checkbox(label="Show mV", tag="cell_show_mv", default_value=False)
+            dpg.add_button(label="Clear All Data", callback=self._clear_cell_voltage_data, width=120, height=25)
+            dpg.add_button(label="Export CSV", callback=self._export_cell_voltage_data, width=120, height=25)
         
         dpg.add_separator()
-        dpg.add_text("Note: Cell voltage data from CAN messages 0x731-0x735 (BQ76952_Stack_Voltage, BQ76952_Cell_Voltages_1_4 through 13_16)", 
-                    color=(150, 150, 150), wrap=1150)
+        dpg.add_spacing(count=1)
+        
+        # Voltage Display Grid - ALL 108 cells in compact table
+        # Layout: 6 columns (one per module) × 18 rows (one per cell)
+        with dpg.child_window(border=True, autosize_x=True, autosize_y=True, tag="cell_voltage_display_container"):
+            self._create_all_cells_grid()
+        
+        dpg.add_separator()
+        dpg.add_text("Note: Cell voltage data from CAN messages (Cell_X_Voltage signals for 6 modules)", 
+                    color=(160, 170, 180), wrap=1150)
+    
+    def _create_all_cells_grid(self):
+        """Create a table showing all 108 cells (6 modules × 18 cells) in a compact grid.
+        
+        Layout: 6 columns (one per module) × 18 rows (one per cell)
+        Similar to thermistor display
+        """
+        # Create table with 6 columns (one per module)
+        with dpg.table(header_row=True, borders_innerH=True, borders_innerV=True, 
+                      borders_outerH=True, borders_outerV=True, scrollY=True, height=600):
+            # Headers: Module 0 through Module 5
+            for module_id in range(6):
+                dpg.add_table_column(label=f"Module {module_id}", width_fixed=True, init_width_or_weight=200)
+            
+            # Create 18 rows (one per cell in each module)
+            for cell_idx in range(18):
+                with dpg.table_row():
+                    # Each column shows one module's cell
+                    for module_id in range(6):
+                        with dpg.table_cell():
+                            with dpg.group(horizontal=True):
+                                dpg.add_text(f"C{cell_idx+1:02d}:", color=(160, 170, 200))
+                                voltage_tag = f"cell_m{module_id}_v_{cell_idx}"
+                                dpg.add_text("-.---- V", tag=voltage_tag, color=(100, 255, 180))
+                                
+                                # Store tag reference
+                                if self.cell_voltage_text_tags[module_id][cell_idx] is None:
+                                    self.cell_voltage_text_tags[module_id][cell_idx] = voltage_tag
+
     
     # ============================================================================
     # Connection Methods
@@ -496,6 +605,7 @@ class PCANExplorerGUI:
             self.driver = PCANDriver()
             channel_items = [channel.name for channel in PCANChannel]
             default_channel = "USB1"
+            baudrate_items = [br.name for br in PCANBaudRate]
         else:
             self.driver = CANableDriver()
             # Get available CANable devices
@@ -510,11 +620,19 @@ class PCANExplorerGUI:
             except:
                 channel_items = ["Device 0", "Device 1", "Device 2"]
                 default_channel = "Device 0"
+            baudrate_items = [br.name for br in CANableBaudRate]
         
         self.device_type = new_device
         
         # Update channel combo
         dpg.configure_item("channel_combo", items=channel_items, default_value=default_channel)
+        
+        # Update baudrate combo
+        dpg.configure_item(self.baudrate_combo, items=baudrate_items, default_value="BAUD_500K")
+        
+        # Only save config if not initializing (user manually changed device type)
+        if not self.gui_initializing:
+            self._save_config()
     
     def _toggle_connection(self):
         """Connect or disconnect from CAN device."""
@@ -545,7 +663,7 @@ class PCANExplorerGUI:
                 self.start_time = datetime.now()
                 dpg.set_item_label(self.connect_button, "Disconnect")
                 dpg.set_value(self.status_text, f"Connected: {self.device_type.upper()} {channel_name} @ {baudrate_name}")
-                dpg.configure_item(self.status_text, color=(100, 255, 100))
+                dpg.configure_item(self.status_text, color=(120, 220, 150))  # Soft green for connected
                 
                 # Start receiving messages
                 self.driver.start_receive_thread(self._on_message_received)
@@ -566,7 +684,7 @@ class PCANExplorerGUI:
                 self.is_connected = False
                 dpg.set_item_label(self.connect_button, "Connect")
                 dpg.set_value(self.status_text, "Disconnected")
-                dpg.configure_item(self.status_text, color=(255, 100, 100))
+                dpg.configure_item(self.status_text, color=(255, 120, 120))  # Soft red for disconnected
                 
                 # Enable controls
                 dpg.configure_item(self.channel_combo, enabled=True)
@@ -602,27 +720,41 @@ class PCANExplorerGUI:
             self.dbc_file_path = file_path
             filename = os.path.basename(file_path)
             dpg.set_value(self.dbc_status_text, f"Loaded: {filename}")
-            dpg.configure_item(self.dbc_status_text, color=(100, 255, 100))
-            # Save config with new DBC path
-            self._save_config()
+            dpg.configure_item(self.dbc_status_text, color=(120, 220, 150))  # Soft green for success
+            
+            # Debug: Print first few messages in DBC
+            print(f"\n[DEBUG] DBC loaded successfully: {filename}")
+            print(f"[DEBUG] Total messages in DBC: {len(self.dbc_database.messages)}")
+            print(f"[DEBUG] First 5 messages:")
+            for i, msg in enumerate(self.dbc_database.messages[:5]):
+                print(f"  {msg.name}: ID=0x{msg.frame_id:X} ({msg.frame_id})")
+            
+            # Save config with new DBC path (only if not initializing)
+            if not self.gui_initializing:
+                self._save_config()
         except Exception as e:
             # Don't show popup during auto-load, just update status
             dpg.set_value(self.dbc_status_text, f"Load failed: {filename if 'filename' in locals() else 'file'}")
-            dpg.configure_item(self.dbc_status_text, color=(255, 150, 100))
+            dpg.configure_item(self.dbc_status_text, color=(255, 140, 100))  # Orange for error
             print(f"Warning: Could not load DBC file {file_path}: {e}")
     
-    def _decode_message(self, can_id: int, data: bytes, is_extended: bool = False) -> Optional[str]:
-        """Decode CAN message using DBC."""
+    def _decode_message(self, can_id: int, data: bytes, is_extended: bool = False) -> Optional[dict]:
+        """Decode CAN message using DBC.
+        
+        Returns:
+            Dictionary with 'summary' (str) and 'signals' (list of tuples) or None
+        """
         if not self.dbc_database:
             return None
         try:
             # For extended IDs, add bit 31 to match DBC storage format
             # DBC files store extended IDs with 0x80000000 flag set
             lookup_id = can_id | 0x80000000 if is_extended else can_id
+            print(f"[DEBUG] Decoding: can_id=0x{can_id:X}, is_extended={is_extended}, lookup_id=0x{lookup_id:X}")
             
             message = self.dbc_database.get_message_by_frame_id(lookup_id)
             decoded = message.decode(data)
-            signal_strs = []
+            signals = []
             
             for signal_name, value in decoded.items():
                 signal = message.get_signal_by_name(signal_name)
@@ -634,7 +766,7 @@ class PCANExplorerGUI:
                     try:
                         choice_name = signal.choices.get(int(value))
                         if choice_name:
-                            signal_strs.append(f"{signal_name}: {choice_name}")
+                            signals.append((signal_name, choice_name, ""))
                             continue
                     except:
                         pass
@@ -655,13 +787,16 @@ class PCANExplorerGUI:
                 else:
                     value_str = str(value)
                 
-                # Add unit if present
-                if unit:
-                    signal_strs.append(f"{signal_name}: {value_str} {unit}")
-                else:
-                    signal_strs.append(f"{signal_name}: {value_str}")
+                # Store signal name, value, and unit
+                signals.append((signal_name, value_str, unit))
             
-            return " | ".join(signal_strs)
+            # Create summary
+            summary = f"{len(signals)} signal{'s' if len(signals) != 1 else ''}"
+            
+            return {
+                'summary': summary,
+                'signals': signals
+            }
         except Exception as e:
             # Debug: print exception (remove after testing)
             if is_extended and can_id == 0x18FF0000:
@@ -693,7 +828,7 @@ class PCANExplorerGUI:
             self.total_messages += 1
             current_time = datetime.now()
 
-            decoded_signals = self._decode_message(msg.id, msg.data, msg.is_extended)
+            decoded_info = self._decode_message(msg.id, msg.data, msg.is_extended)
             message_name = self._get_message_name(msg.id, msg.is_extended)
             
             if msg.id in self.message_data:
@@ -706,7 +841,7 @@ class PCANExplorerGUI:
                 data['last_timestamp'] = current_time.strftime("%H:%M:%S.%f")[:-3]
                 data['data'] = msg.data
                 data['dlc'] = msg.dlc
-                data['decoded'] = decoded_signals
+                data['decoded_info'] = decoded_info
                 data['name'] = message_name if message_name else ""
             else:
                 msg_type = "EXT" if msg.is_extended else "STD"
@@ -719,13 +854,22 @@ class PCANExplorerGUI:
                     'type': msg_type,
                     'dlc': msg.dlc,
                     'data': msg.data,
-                    'decoded': decoded_signals,
+                    'decoded_info': decoded_info,
                     'count': 1,
                     'last_timestamp': current_time.strftime("%H:%M:%S.%f")[:-3],
                     'last_time': current_time,
                     'period_ms': 0.0,
                     'row_tag': None
                 }
+    
+    def _toggle_row_expansion(self, sender, app_data, user_data):
+        """Toggle signal expansion for a row."""
+        can_id = user_data
+        if can_id in self.expanded_rows:
+            self.expanded_rows.remove(can_id)
+        else:
+            self.expanded_rows.add(can_id)
+        self._update_message_table()
     
     def _update_message_table(self):
         """Update the message table display."""
@@ -734,17 +878,54 @@ class PCANExplorerGUI:
             
             for can_id, data in sorted(self.message_data.items()):
                 data_hex = ' '.join([f'{b:02X}' for b in data['data']])
-                decoded_str = data.get('decoded', '') or ''
+                
+                # Handle decoded signals display
+                decoded_info = data.get('decoded_info')
                 message_name = data.get('name', '') or ''
+                
+                if decoded_info:
+                    # Check if this row is expanded
+                    if can_id in self.expanded_rows:
+                        # Show full signal list
+                        decoded_lines = []
+                        for sig_name, sig_value, sig_unit in decoded_info['signals']:
+                            if sig_unit:
+                                decoded_lines.append(f"{sig_name}: {sig_value} {sig_unit}")
+                            else:
+                                decoded_lines.append(f"{sig_name}: {sig_value}")
+                        decoded_str = "\n".join(decoded_lines)
+                        button_label = "-"  # Minus when expanded (collapse)
+                    else:
+                        # Show summary only
+                        decoded_str = decoded_info['summary']
+                        button_label = "+"  # Plus when collapsed (expand)
+                else:
+                    decoded_str = ""
+                    button_label = ""
                 
                 if data['row_tag'] is None or data['row_tag'] not in existing_rows:
                     with dpg.table_row(parent="message_table") as row_tag:
-                        dpg.add_text(f"0x{data['id']:X}", tag=f"id_{can_id}")
+                        # Format CAN ID with 8 digits for extended IDs, variable for standard
+                        can_id_str = f"0x{data['id']:08X}" if data['type'].startswith('EXT') else f"0x{data['id']:X}"
+                        dpg.add_text(can_id_str, tag=f"id_{can_id}")
                         dpg.add_text(message_name, tag=f"name_{can_id}")
                         dpg.add_text(data['type'], tag=f"type_{can_id}")
                         dpg.add_text(str(data['dlc']), tag=f"dlc_{can_id}")
                         dpg.add_text(data_hex, tag=f"data_{can_id}")
-                        dpg.add_text(decoded_str, tag=f"decoded_{can_id}", wrap=250)
+                        
+                        # Decoded signals cell with expand/collapse button
+                        with dpg.group(horizontal=True, tag=f"decoded_group_{can_id}"):
+                            if decoded_info:
+                                dpg.add_button(
+                                    label=button_label,
+                                    callback=self._toggle_row_expansion,
+                                    user_data=can_id,
+                                    width=25,
+                                    height=20,
+                                    tag=f"expand_btn_{can_id}"
+                                )
+                            dpg.add_text(decoded_str, tag=f"decoded_{can_id}", wrap=220)
+                        
                         dpg.add_text(str(data['count']), tag=f"count_{can_id}")
                         dpg.add_text(data['last_timestamp'], tag=f"time_{can_id}")
                         dpg.add_text(f"{data['period_ms']:.1f}", tag=f"period_{can_id}")
@@ -758,6 +939,10 @@ class PCANExplorerGUI:
                     dpg.set_value(f"count_{can_id}", str(data['count']))
                     dpg.set_value(f"time_{can_id}", data['last_timestamp'])
                     dpg.set_value(f"period_{can_id}", f"{data['period_ms']:.1f}")
+                    
+                    # Update expand button if it exists
+                    if decoded_info and dpg.does_item_exist(f"expand_btn_{can_id}"):
+                        dpg.configure_item(f"expand_btn_{can_id}", label=button_label)
             
             # Update statistics
             unique_ids = len(self.message_data)
@@ -767,30 +952,11 @@ class PCANExplorerGUI:
                 dpg.set_value(self.stats_text, 
                             f"Total: {self.total_messages} | Unique IDs: {unique_ids} | Rate: {rate:.1f} msg/s")
     
-    def _send_message(self):
-        """Send a CAN message."""
-        if not self.is_connected:
-            self._show_popup("Not Connected", "Please connect first.")
-            return
-        
-        try:
-            can_id_str = dpg.get_value("can_id_input").strip()
-            can_id = int(can_id_str, 16)
-            
-            data_str = dpg.get_value("data_input").strip()
-            data_bytes = bytes.fromhex(data_str.replace(" ", ""))
-            
-            is_extended = dpg.get_value("extended_checkbox")
-            is_remote = dpg.get_value("remote_checkbox")
-            
-            self.driver.send_message(can_id, data_bytes, is_extended, is_remote)
-        except Exception as e:
-            self._show_popup("Send Failed", f"Error: {str(e)}")
-    
     def _clear_messages(self):
         """Clear message table."""
         with self.message_lock:
             self.message_data.clear()
+            self.expanded_rows.clear()
             self.total_messages = 0
             self.start_time = datetime.now()
             children = dpg.get_item_children("message_table", slot=1)
@@ -798,36 +964,517 @@ class PCANExplorerGUI:
                 dpg.delete_item(child)
             dpg.set_value(self.stats_text, "Total: 0 | Unique IDs: 0 | Rate: 0 msg/s")
     
-    def _export_messages(self):
-        """Export messages to CSV."""
-        if not self.message_data:
-            self._show_popup("No Data", "No messages to export.")
+    # ============================================================================
+    # Send Message Methods
+    # ============================================================================
+    
+    def _on_send_message_selected(self, sender, app_data):
+        """Handle selection in send messages listbox."""
+        # Find the index of the selected message
+        selected_label = app_data
+        print(f"[DEBUG] Listbox selection callback: '{selected_label}'")
+        
+        if not selected_label:
+            self.selected_send_row = None
+            self._update_send_message_details()
+            return
+        
+        # Find which message was selected
+        with self.send_messages_lock:
+            for idx, msg in enumerate(self.send_messages):
+                msg_type = "EXT" if msg['is_extended'] else "STD"
+                label = f"{msg['name']} (0x{msg['can_id']:X} {msg_type}) - Sent: {msg['sent_count']}"
+                if label == selected_label:
+                    self.selected_send_row = idx
+                    print(f"[DEBUG] Selected message index: {idx}, name: {msg['name']}")
+                    self._update_send_message_details()
+                    
+                    # Check for double-click to send
+                    if dpg.is_mouse_button_double_clicked(dpg.mvMouseButton_Left):
+                        print(f"[DEBUG] Double-click detected, sending message")
+                        self._send_selected_message()
+                    break
+    
+    def _update_send_message_details(self):
+        """Update the message details panel."""
+        try:
+            # Clear existing details
+            if dpg.does_item_exist("send_message_details"):
+                children = dpg.get_item_children("send_message_details", slot=1)
+                for child in children:
+                    dpg.delete_item(child)
+            
+            if self.selected_send_row is None or self.selected_send_row >= len(self.send_messages):
+                dpg.add_text("No message selected", color=(180, 190, 220), parent="send_message_details")
+            else:
+                with self.send_messages_lock:
+                    msg = self.send_messages[self.selected_send_row]
+                    
+                    msg_type = "EXT" if msg['is_extended'] else "STD"
+                    if msg['is_remote']:
+                        msg_type += "-R"
+                    
+                    data_hex = ' '.join([f'{b:02X}' for b in msg['data']])
+                    
+                    dpg.add_text(f"Name: {msg['name']}", color=(100, 255, 200), parent="send_message_details")
+                    dpg.add_text(f"CAN ID: 0x{msg['can_id']:X}", color=(220, 220, 255), parent="send_message_details")
+                    dpg.add_text(f"Type: {msg_type}", color=(220, 220, 255), parent="send_message_details")
+                    dpg.add_text(f"DLC: {msg['dlc']}", color=(220, 220, 255), parent="send_message_details")
+                    dpg.add_text(f"Data: {data_hex}", color=(220, 220, 255), parent="send_message_details")
+                    dpg.add_text(f"Sent Count: {msg['sent_count']}", color=(220, 220, 255), parent="send_message_details")
+                    dpg.add_separator(parent="send_message_details")
+                    dpg.add_text("Signals:", color=(140, 200, 255), parent="send_message_details")
+                    
+                    if msg['signal_values'] and msg['dbc_message']:
+                        try:
+                            for sig_name, sig_value in msg['signal_values'].items():
+                                signal = msg['dbc_message'].get_signal_by_name(sig_name)
+                                if signal.choices and int(sig_value) in signal.choices:
+                                    value_str = signal.choices[int(sig_value)]
+                                    dpg.add_text(f"  {sig_name} = {sig_value} ({value_str})", color=(220, 220, 255), parent="send_message_details")
+                                else:
+                                    dpg.add_text(f"  {sig_name} = {sig_value}", color=(220, 220, 255), parent="send_message_details")
+                        except Exception as e:
+                            dpg.add_text(f"  Error displaying signals: {e}", color=(255, 100, 120), parent="send_message_details")
+                    else:
+                        dpg.add_text("  No signals (custom message)", color=(180, 190, 220), parent="send_message_details")
+        except Exception as e:
+            print(f"[ERROR] Failed to update message details: {e}")
+            # Try to at least show an error message
+            try:
+                dpg.add_text(f"Error: {e}", color=(255, 100, 100), parent="send_message_details")
+            except:
+                pass
+    
+    def _show_add_dbc_message_dialog(self):
+        """Show dialog to add a message from DBC file."""
+        if not self.dbc_database:
+            self._show_popup("No DBC File", "Please load a DBC file first.")
+            return
+        
+        # Create popup window
+        if dpg.does_item_exist("add_dbc_msg_window"):
+            dpg.delete_item("add_dbc_msg_window")
+        
+        with dpg.window(label="Add Message from DBC", modal=True, tag="add_dbc_msg_window",
+                       width=500, height=400, pos=(400, 200)):
+            dpg.add_text("Select a message from the DBC file:", color=(140, 200, 255))
+            dpg.add_separator()
+            
+            # List all messages
+            message_names = [msg.name for msg in self.dbc_database.messages]
+            dpg.add_listbox(items=message_names, tag="dbc_message_selector", 
+                           num_items=15, width=480)
+            
+            dpg.add_separator()
+            with dpg.group(horizontal=True):
+                dpg.add_button(label="Add Message", callback=self._add_dbc_message_confirmed, 
+                              width=120, height=30)
+                dpg.add_button(label="Cancel", callback=lambda: dpg.delete_item("add_dbc_msg_window"),
+                              width=100, height=30)
+    
+    def _add_dbc_message_confirmed(self):
+        """Add the selected DBC message to send table."""
+        selected_name = dpg.get_value("dbc_message_selector")
+        if not selected_name:
             return
         
         try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"can_messages_{timestamp}.csv"
+            message = self.dbc_database.get_message_by_name(selected_name)
             
-            with open(filename, 'w') as f:
-                f.write("CAN_ID,Name,Type,DLC,Data,Decoded,Count,Last_RX,Period_ms\n")
-                with self.message_lock:
-                    for can_id, data in sorted(self.message_data.items()):
-                        data_hex = ''.join([f'{b:02X}' for b in data['data']])
-                        decoded = (data.get('decoded', '') or '').replace(',', ';')
-                        f.write(f"0x{data['id']:X},{data.get('name','')},{data['type']},"
-                              f"{data['dlc']},{data_hex},\"{decoded}\","
-                              f"{data['count']},{data['last_timestamp']},{data['period_ms']:.1f}\n")
+            # Create default signal values (all zeros)
+            signal_values = {}
+            for signal in message.signals:
+                # Use default value or 0
+                if signal.choices and 0 in signal.choices:
+                    signal_values[signal.name] = 0
+                else:
+                    signal_values[signal.name] = 0
             
-            self._show_popup("Export Success", f"Saved: {filename}")
+            # Encode the message with default values
+            data = message.encode(signal_values)
+            
+            # Determine if extended ID
+            is_extended = message.frame_id > 0x7FF
+            actual_id = message.frame_id & 0x1FFFFFFF if is_extended else message.frame_id
+            
+            send_msg = {
+                'name': message.name,
+                'can_id': actual_id,
+                'is_extended': is_extended,
+                'is_remote': False,
+                'dlc': len(data),
+                'data': data,
+                'signal_values': signal_values,
+                'dbc_message': message,
+                'sent_count': 0,
+                'row_tag': None
+            }
+            
+            with self.send_messages_lock:
+                self.send_messages.append(send_msg)
+                # Select the newly added message
+                self.selected_send_row = len(self.send_messages) - 1
+            
+            self._update_send_messages_table()
+            dpg.delete_item("add_dbc_msg_window")
+            
         except Exception as e:
-            self._show_popup("Export Failed", f"Error: {str(e)}")
+            self._show_popup("Add Failed", f"Error: {str(e)}")
+    
+    def _show_add_custom_message_dialog(self):
+        """Show dialog to add a custom message."""
+        if dpg.does_item_exist("add_custom_msg_window"):
+            dpg.delete_item("add_custom_msg_window")
+        
+        with dpg.window(label="Add Custom Message", modal=True, tag="add_custom_msg_window",
+                       width=450, height=300, pos=(400, 250)):
+            dpg.add_text("Create a custom CAN message:", color=(140, 200, 255))
+            dpg.add_separator()
+            
+            dpg.add_text("Message Name:")
+            dpg.add_input_text(tag="custom_msg_name", default_value="Custom_Message", width=400)
+            
+            dpg.add_text("CAN ID (Hex):")
+            dpg.add_input_text(tag="custom_msg_id", default_value="123", width=150)
+            
+            dpg.add_text("Data (Hex, space separated):")
+            dpg.add_input_text(tag="custom_msg_data", default_value="00 00 00 00 00 00 00 00", width=400)
+            
+            dpg.add_checkbox(label="Extended ID", tag="custom_msg_ext", default_value=False)
+            dpg.add_checkbox(label="Remote Frame", tag="custom_msg_rtr", default_value=False)
+            
+            dpg.add_separator()
+            with dpg.group(horizontal=True):
+                dpg.add_button(label="Add Message", callback=self._add_custom_message_confirmed,
+                              width=120, height=30)
+                dpg.add_button(label="Cancel", callback=lambda: dpg.delete_item("add_custom_msg_window"),
+                              width=100, height=30)
+    
+    def _add_custom_message_confirmed(self):
+        """Add the custom message to send table."""
+        try:
+            name = dpg.get_value("custom_msg_name").strip()
+            can_id_str = dpg.get_value("custom_msg_id").strip()
+            can_id = int(can_id_str, 16)
+            data_str = dpg.get_value("custom_msg_data").strip()
+            data = bytes.fromhex(data_str.replace(" ", ""))
+            is_extended = dpg.get_value("custom_msg_ext")
+            is_remote = dpg.get_value("custom_msg_rtr")
+            
+            send_msg = {
+                'name': name,
+                'can_id': can_id,
+                'is_extended': is_extended,
+                'is_remote': is_remote,
+                'dlc': len(data),
+                'data': data,
+                'signal_values': None,
+                'dbc_message': None,
+                'sent_count': 0,
+                'row_tag': None
+            }
+            
+            with self.send_messages_lock:
+                self.send_messages.append(send_msg)
+                # Select the newly added message
+                self.selected_send_row = len(self.send_messages) - 1
+            
+            self._update_send_messages_table()
+            dpg.delete_item("add_custom_msg_window")
+            
+        except Exception as e:
+            self._show_popup("Add Failed", f"Error: {str(e)}")
+    
+    def _edit_send_message(self):
+        """Edit the selected send message."""
+        if self.selected_send_row is None or self.selected_send_row >= len(self.send_messages):
+            self._show_popup("No Selection", "Please select a message to edit.")
+            return
+        
+        msg = self.send_messages[self.selected_send_row]
+        
+        # If it's a DBC message, show signal editor
+        if msg['dbc_message']:
+            self._show_signal_editor_dialog(self.selected_send_row)
+        else:
+            # Show custom message editor
+            self._show_edit_custom_message_dialog(self.selected_send_row)
+    
+    def _show_signal_editor_dialog(self, msg_index):
+        """Show dialog to edit signal values for a DBC message."""
+        msg = self.send_messages[msg_index]
+        dbc_msg = msg['dbc_message']
+        
+        if dpg.does_item_exist("signal_editor_window"):
+            dpg.delete_item("signal_editor_window")
+        
+        with dpg.window(label=f"Edit Signals - {msg['name']}", modal=True, 
+                       tag="signal_editor_window", width=600, height=500, pos=(350, 150)):
+            dpg.add_text(f"Message: {msg['name']} (0x{msg['can_id']:X})", color=(140, 200, 255))
+            dpg.add_separator()
+            
+            # Create input for each signal
+            with dpg.child_window(height=350, border=True):
+                for signal in dbc_msg.signals:
+                    with dpg.group():
+                        dpg.add_text(f"{signal.name}:", color=(200, 210, 240))
+                        
+                        # Show unit and range info
+                        info_text = f"  Range: {signal.minimum} to {signal.maximum}"
+                        if signal.unit:
+                            info_text += f" {signal.unit}"
+                        dpg.add_text(info_text, color=(170, 180, 210))
+                        
+                        current_value = msg['signal_values'].get(signal.name, 0)
+                        
+                        # If signal has choices (value table), use combo box
+                        if signal.choices:
+                            choices_list = [f"{v}: {name}" for v, name in signal.choices.items()]
+                            # Find current selection
+                            default_choice = f"{int(current_value)}: {signal.choices.get(int(current_value), 'Unknown')}"
+                            dpg.add_combo(items=choices_list, default_value=default_choice,
+                                         tag=f"signal_input_{signal.name}", width=400)
+                        else:
+                            # Numeric input
+                            dpg.add_input_float(tag=f"signal_input_{signal.name}", 
+                                              default_value=float(current_value), width=200,
+                                              step=signal.scale)
+                        
+                        dpg.add_spacing(count=1)
+            
+            dpg.add_separator()
+            with dpg.group(horizontal=True):
+                dpg.add_button(label="Apply Changes", 
+                              callback=lambda: self._apply_signal_changes(msg_index),
+                              width=120, height=30)
+                dpg.add_button(label="Cancel",
+                              callback=lambda: dpg.delete_item("signal_editor_window"),
+                              width=100, height=30)
+            
+            # Store msg_index for callback
+            dpg.set_item_user_data("signal_editor_window", msg_index)
+    
+    def _apply_signal_changes(self, msg_index):
+        """Apply edited signal values and re-encode message."""
+        try:
+            msg = self.send_messages[msg_index]
+            dbc_msg = msg['dbc_message']
+            
+            # Read all signal values from inputs
+            new_signal_values = {}
+            for signal in dbc_msg.signals:
+                tag = f"signal_input_{signal.name}"
+                if signal.choices:
+                    # Parse "value: name" format
+                    combo_value = dpg.get_value(tag)
+                    value = int(combo_value.split(":")[0])
+                    new_signal_values[signal.name] = value
+                else:
+                    new_signal_values[signal.name] = dpg.get_value(tag)
+            
+            # Re-encode message with new values
+            new_data = dbc_msg.encode(new_signal_values)
+            
+            # Update message
+            msg['signal_values'] = new_signal_values
+            msg['data'] = new_data
+            msg['dlc'] = len(new_data)
+            
+            self._update_send_messages_table()
+            dpg.delete_item("signal_editor_window")
+            
+        except Exception as e:
+            self._show_popup("Update Failed", f"Error: {str(e)}")
+    
+    def _show_edit_custom_message_dialog(self, msg_index):
+        """Show dialog to edit a custom message."""
+        msg = self.send_messages[msg_index]
+        
+        if dpg.does_item_exist("edit_custom_msg_window"):
+            dpg.delete_item("edit_custom_msg_window")
+        
+        data_hex = ' '.join([f'{b:02X}' for b in msg['data']])
+        
+        with dpg.window(label="Edit Custom Message", modal=True, tag="edit_custom_msg_window",
+                       width=450, height=300, pos=(400, 250)):
+            dpg.add_text("Edit custom CAN message:", color=(140, 200, 255))
+            dpg.add_separator()
+            
+            dpg.add_text("Message Name:")
+            dpg.add_input_text(tag="edit_msg_name", default_value=msg['name'], width=400)
+            
+            dpg.add_text("CAN ID (Hex):")
+            dpg.add_input_text(tag="edit_msg_id", default_value=f"{msg['can_id']:X}", width=150)
+            
+            dpg.add_text("Data (Hex, space separated):")
+            dpg.add_input_text(tag="edit_msg_data", default_value=data_hex, width=400)
+            
+            dpg.add_checkbox(label="Extended ID", tag="edit_msg_ext", default_value=msg['is_extended'])
+            dpg.add_checkbox(label="Remote Frame", tag="edit_msg_rtr", default_value=msg['is_remote'])
+            
+            dpg.add_separator()
+            with dpg.group(horizontal=True):
+                dpg.add_button(label="Save Changes", 
+                              callback=lambda: self._save_custom_message_edits(msg_index),
+                              width=120, height=30)
+                dpg.add_button(label="Cancel",
+                              callback=lambda: dpg.delete_item("edit_custom_msg_window"),
+                              width=100, height=30)
+    
+    def _save_custom_message_edits(self, msg_index):
+        """Save edits to custom message."""
+        try:
+            msg = self.send_messages[msg_index]
+            
+            msg['name'] = dpg.get_value("edit_msg_name").strip()
+            msg['can_id'] = int(dpg.get_value("edit_msg_id").strip(), 16)
+            data_str = dpg.get_value("edit_msg_data").strip()
+            msg['data'] = bytes.fromhex(data_str.replace(" ", ""))
+            msg['dlc'] = len(msg['data'])
+            msg['is_extended'] = dpg.get_value("edit_msg_ext")
+            msg['is_remote'] = dpg.get_value("edit_msg_rtr")
+            
+            self._update_send_messages_table()
+            dpg.delete_item("edit_custom_msg_window")
+            
+        except Exception as e:
+            self._show_popup("Save Failed", f"Error: {str(e)}")
+    
+    def _remove_send_message(self):
+        """Remove selected message from send table."""
+        if self.selected_send_row is None or self.selected_send_row >= len(self.send_messages):
+            self._show_popup("No Selection", "Please select a message to remove.")
+            return
+        
+        with self.send_messages_lock:
+            self.send_messages.pop(self.selected_send_row)
+        
+        self.selected_send_row = None
+        self._update_send_messages_table()
+    
+    def _clear_send_messages(self):
+        """Clear all send messages."""
+        with self.send_messages_lock:
+            self.send_messages.clear()
+        
+        self.selected_send_row = None
+        self._update_send_messages_table()
+    
+    def _send_selected_message(self):
+        """Send the currently selected message."""
+        print(f"[DEBUG] Send button clicked, selected_send_row: {self.selected_send_row}, total messages: {len(self.send_messages)}")
+        
+        if self.selected_send_row is None or self.selected_send_row >= len(self.send_messages):
+            self._show_popup("No Selection", "Please select a message to send.")
+            return
+            
+        if not self.is_connected:
+            self._show_popup("Not Connected", "Please connect to CAN device first.")
+            return
+        
+        try:
+            msg = self.send_messages[self.selected_send_row]
+            print(f"[DEBUG] Sending message: {msg['name']}, ID: 0x{msg['can_id']:X}")
+            self.driver.send_message(msg['can_id'], msg['data'], msg['is_extended'], msg['is_remote'])
+            
+            # Increment sent count
+            msg['sent_count'] += 1
+            print(f"[DEBUG] Message sent successfully, count: {msg['sent_count']}")
+            self._update_send_messages_table()
+            
+        except Exception as e:
+            print(f"[DEBUG] Send failed: {e}")
+            self._show_popup("Send Failed", f"Error: {str(e)}")
+    
+    def _update_send_messages_table(self):
+        """Update the send messages listbox display."""
+        # Store the current selection index before updating
+        current_selection_idx = self.selected_send_row
+        
+        # Build list of message names with IDs
+        message_labels = []
+        with self.send_messages_lock:
+            for idx, msg in enumerate(self.send_messages):
+                msg_type = "EXT" if msg['is_extended'] else "STD"
+                label = f"{msg['name']} (0x{msg['can_id']:X} {msg_type}) - Sent: {msg['sent_count']}"
+                message_labels.append(label)
+        
+        # Update listbox
+        if dpg.does_item_exist("send_messages_listbox"):
+            # Temporarily disable callback to prevent triggering during update
+            dpg.configure_item("send_messages_listbox", items=message_labels, callback=None)
+            
+            # Restore selection if valid
+            if current_selection_idx is not None and current_selection_idx < len(message_labels):
+                dpg.set_value("send_messages_listbox", message_labels[current_selection_idx])
+            
+            # Re-enable callback
+            dpg.configure_item("send_messages_listbox", callback=self._on_send_message_selected)
+            
+            # Update details panel
+            self._update_send_message_details()
+    
     
     # ============================================================================
     # Thermistor Monitor Methods
     # ============================================================================
     
+    def _create_all_thermistors_grid(self):
+        """Create a single grid showing all 336 thermistors from all 6 modules.
+        
+        Layout: 6 modules horizontally, 56 channels vertically
+        Creates a 56-row table with 6 columns (one per module)
+        """
+        # Create table with headers for each module
+        with dpg.table(header_row=True, borders_innerH=True, borders_innerV=True, 
+                      borders_outerH=True, borders_outerV=True, scrollY=True):
+            # Headers: Module 0 through Module 5
+            for module_id in range(6):
+                dpg.add_table_column(label=f"Module {module_id}", width_fixed=True, init_width_or_weight=160)
+            
+            # Create 56 rows (one per channel)
+            for channel in range(56):
+                with dpg.table_row():
+                    # Each column shows one module's thermistor
+                    for module_id in range(6):
+                        with dpg.table_cell():
+                            with dpg.group(horizontal=True):
+                                dpg.add_text(f"Ch{channel:02d}:", color=(160, 170, 200))
+                                temp_tag = f"therm_m{module_id}_temp_{channel}"
+                                dpg.add_text("--.-°C", tag=temp_tag, color=(100, 255, 180))
+                                
+                                # Store tag reference
+                                if self.thermistor_text_tags[module_id][channel] is None:
+                                    self.thermistor_text_tags[module_id][channel] = temp_tag
+    
+    def _create_thermistor_grid(self, module_id: int):
+        """Legacy method - now creates all thermistors grid."""
+        # This method is kept for compatibility but now just creates the full grid
+        self._create_all_thermistors_grid()
+    
+    def _on_thermistor_module_changed(self, sender, app_data):
+        """Handle module selector change - NOT USED in all-in-one view."""
+        pass  # No longer needed since we show all modules
+    
     def _update_thermistor_data(self, can_id: int, data: bytes):
-        """Update thermistor display from incoming CAN messages."""
+        """Update thermistor display from incoming CAN messages.
+        
+        Handles messages from all 6 modules:
+        Module 0: 0x08F00000-0x08F0000D (Temps 0-55)
+        Module 1: 0x08F01000-0x08F0100D (Temps 56-111)
+        Module 2: 0x08F02000-0x08F0200D (Temps 112-167)
+        Module 3: 0x08F03000-0x08F0300D (Temps 168-223)
+        Module 4: 0x08F04000-0x08F0400D (Temps 224-279)
+        Module 5: 0x08F05000-0x08F0500D (Temps 280-335)
+        
+        CAN ID Format: 0x08F0XYZZ
+          Bits 15-12 (X): Module ID (0-5)
+          Bits 11-8  (Y): Message group (0 = temps)
+          Bits 7-0   (ZZ): Message index (00-0D)
+        
+        Signal naming in DBC: Temp_XXX where XXX is absolute thermistor number (0-335)
+        """
         # Use the existing DBC decoder to get signal values
         if not self.dbc_database:
             return
@@ -840,55 +1487,69 @@ class PCANExplorerGUI:
             
             current_time = datetime.now().strftime("%H:%M:%S")
             
-            # BMS_Temp_Msg_00 through BMS_Temp_Msg_13 (0x18FF0000 - 0x18FF000D)
-            # Each message has 4 thermistors: Temp_Therm_0 through Temp_Therm_3 for msg 0, etc.
-            # Calculate base channel from CAN ID
-            base_id = 0x18FF0000
-            if base_id <= can_id <= base_id + 13:
-                msg_num = can_id - base_id
-                base_channel = msg_num * 4
-                
-                # Update all 4 thermistors in this message
-                for i in range(4):
-                    therm_num = base_channel + i
-                    signal_name = f'Temp_Therm_{therm_num}'
-                    
-                    if signal_name in decoded and therm_num < 56:
-                        self._update_single_thermistor(therm_num, decoded[signal_name], current_time)
+            # Extract module ID from CAN ID (bits 15-12)
+            # Example: 0x08F02005 -> bits 15-12 = 0x2 (module 2)
+            module_id = (can_id >> 12) & 0x0F
             
-            # BMS_Temp_Raw_Msg_00 through BMS_Temp_Raw_Msg_13 (0x18FF0100 - 0x18FF010D)
-            # Each message has 4 ADC values
-            base_raw_id = 0x18FF0100
-            if base_raw_id <= can_id <= base_raw_id + 13:
-                msg_num = can_id - base_raw_id
-                base_channel = msg_num * 4
+            if module_id > 5:
+                return  # Invalid module ID
+            
+            # Check if this is a temperature message (group 0x0, indices 0x00-0x0D)
+            msg_index = can_id & 0xFF
+            
+            if msg_index <= 0x0D:  # Temperature messages (14 messages, 0x00-0x0D)
+                # DBC uses ABSOLUTE thermistor numbering (0-335)
+                # Calculate the absolute base for this message
+                absolute_base = (module_id * 56) + (msg_index * 4)
                 
-                # Update all 4 ADC values in this message
+                # Process each temperature signal in the message (4 per message)
                 for i in range(4):
-                    therm_num = base_channel + i
-                    signal_name = f'Raw_ADC_Therm_{therm_num}'
+                    absolute_therm_num = absolute_base + i
                     
-                    if signal_name in decoded and therm_num < 56 and therm_num < len(self.thermistor_adc_tags):
-                        dpg.set_value(self.thermistor_adc_tags[therm_num], f"ADC:{int(decoded[signal_name])}")
+                    # Channel within this module (0-55)
+                    channel = (msg_index * 4) + i
+                    if channel >= 56:
+                        continue
+                    
+                    # Signal name in DBC is absolute: Temp_XXX (0-335)
+                    signal_name = f'Temp_{absolute_therm_num:03d}'
+                    
+                    if signal_name in decoded:
+                        temp_value = decoded[signal_name]
+                        self._update_single_thermistor(module_id, channel, temp_value, current_time)
+                    else:
+                        # Try alternate patterns if absolute naming doesn't work
+                        for pattern in [f'Temp_{channel:03d}', f'Temp_Therm_{channel}', f'Temp_{i}']:
+                            if pattern in decoded:
+                                temp_value = decoded[pattern]
+                                self._update_single_thermistor(module_id, channel, temp_value, current_time)
+                                break
             
         except Exception as e:
             # Message not in DBC or decode error - silently ignore
             pass
     
-    def _update_single_thermistor(self, channel: int, temp: float, time_str: str):
-        """Update a single thermistor channel display."""
-        if channel >= 56:
+    def _update_single_thermistor(self, module_id: int, channel: int, temp: float, time_str: str):
+        """Update a single thermistor channel display.
+        
+        Args:
+            module_id: Module number (0-5)
+            channel: Channel number within module (0-55)
+            temp: Temperature value in degrees C
+            time_str: Timestamp string
+        """
+        if module_id >= 6 or channel >= 56:
             return
         
         # Update stored value
-        self.thermistor_temps[channel] = temp
+        self.thermistor_temps[module_id][channel] = temp
         
-        # Update GUI
-        if channel < len(self.thermistor_text_tags):
+        # Update GUI - only if this module is currently displayed
+        temp_tag = f"therm_m{module_id}_temp_{channel}"
+        if dpg.does_item_exist(temp_tag):
             temp_color = self._get_temp_color(temp)
-            dpg.set_value(self.thermistor_text_tags[channel], f"{temp:.1f}°C")
-            dpg.configure_item(self.thermistor_text_tags[channel], color=temp_color)
-            dpg.set_value(f"therm_time_{channel}", time_str)
+            dpg.set_value(temp_tag, f"{temp:.1f}°C")
+            dpg.configure_item(temp_tag, color=temp_color)
         
         # Update statistics
         self._update_thermistor_stats()
@@ -906,62 +1567,59 @@ class PCANExplorerGUI:
     def _get_temp_color(self, temp: float):
         """Get color for temperature display based on value."""
         if temp < -50:
-            return (100, 100, 255)  # Very cold - blue
+            return (120, 160, 255)  # Very cold - blue
         elif temp < 0:
-            return (100, 200, 255)  # Cold - light blue
+            return (140, 200, 255)  # Cold - light blue
         elif temp < 25:
-            return (100, 255, 100)  # Normal - green
+            return (120, 220, 150)  # Normal - soft green
         elif temp < 50:
-            return (255, 255, 100)  # Warm - yellow
+            return (240, 220, 120)  # Warm - yellow
         elif temp < 85:
-            return (255, 200, 100)  # Hot - orange
+            return (255, 180, 100)  # Hot - orange
         else:
-            return (255, 100, 100)  # Very hot - red
+            return (255, 120, 120)  # Very hot - soft red
     
     def _update_thermistor_stats(self):
-        """Update thermistor statistics display."""
-        valid_temps = [t for t in self.thermistor_temps if t is not None]
+        """Update thermistor statistics display for all modules."""
+        # Global stats (all modules)
+        all_temps = []
+        module_counts = [0] * 6  # Count active thermistors per module
         
-        if not valid_temps:
-            stats_text = "Active: 0/56 | Min: --°C | Max: --°C | Avg: --°C"
+        for module_id in range(6):
+            module_temps = [t for t in self.thermistor_temps[module_id] if t is not None]
+            all_temps.extend(module_temps)
+            module_counts[module_id] = len(module_temps)
+        
+        if not all_temps:
+            global_stats = "All Modules | Active: 0/336 | Min: --°C | Max: --°C | Avg: --°C"
         else:
-            active = len(valid_temps)
-            min_temp = min(valid_temps)
-            max_temp = max(valid_temps)
-            avg_temp = sum(valid_temps) / len(valid_temps)
-            stats_text = f"Active: {active}/56 | Min: {min_temp:.1f}°C | Max: {max_temp:.1f}°C | Avg: {avg_temp:.1f}°C"
+            active_global = len(all_temps)
+            min_global = min(all_temps)
+            max_global = max(all_temps)
+            avg_global = sum(all_temps) / len(all_temps)
+            
+            # Include per-module active counts
+            module_str = " | ".join([f"M{i}:{module_counts[i]}" for i in range(6)])
+            global_stats = (f"Active: {active_global}/336 ({module_str}) | "
+                          f"Min: {min_global:.1f}°C | Max: {max_global:.1f}°C | Avg: {avg_global:.1f}°C")
         
-        dpg.set_value("therm_stats", stats_text)
+        dpg.set_value("therm_global_stats", global_stats)
     
     def _clear_thermistor_data(self):
-        """Clear all thermistor data."""
-        self.thermistor_temps = [None] * 56
+        """Clear all thermistor data from all modules."""
+        # Clear stored data
+        self.thermistor_temps = [[None] * 56 for _ in range(6)]
         
-        for i in range(56):
-            if i < len(self.thermistor_text_tags):
-                dpg.set_value(self.thermistor_text_tags[i], "---.-°C")
-                dpg.configure_item(self.thermistor_text_tags[i], color=(100, 255, 100))
+        # Clear all visible tags (all modules now visible)
+        for module_id in range(6):
+            for channel in range(56):
+                temp_tag = f"therm_m{module_id}_temp_{channel}"
+                if dpg.does_item_exist(temp_tag):
+                    dpg.set_value(temp_tag, "--.-°C")
+                    dpg.configure_item(temp_tag, color=(120, 220, 150))
         
         self._update_thermistor_stats()
     
-    def _export_thermistor_data(self):
-        """Export current thermistor temperatures to CSV."""
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"thermistor_temps_{timestamp}.csv"
-            
-            with open(filename, 'w') as f:
-                f.write("Channel,Temperature_degC,Status\n")
-                for i in range(56):
-                    temp = self.thermistor_temps[i]
-                    if temp is not None:
-                        f.write(f"{i},{temp:.1f},Active\n")
-                    else:
-                        f.write(f"{i},,No Data\n")
-            
-            self._show_popup("Export Success", f"Saved: {filename}")
-        except Exception as e:
-            self._show_popup("Export Failed", f"Error: {str(e)}")
     
     # ============================================================================
     # Cell Voltage Monitor Methods
@@ -980,83 +1638,97 @@ class PCANExplorerGUI:
             
             current_time = datetime.now().strftime("%H:%M:%S")
             
+            # Cell voltage messages for 6 modules × 18 cells
+            # Assuming messages follow pattern: Module_X_Cell_Voltages_Y_Z
+            # where X is module (0-5) and Y-Z indicates which cells (e.g., 1-6, 7-12, 13-18)
+            # Each message carries voltages for 6 cells (3 messages per module)
+            
+            # Parse cell voltage messages dynamically based on signal names
+            # Look for signals like "Cell_1_Voltage", "Cell_2_Voltage", etc.
+            for signal_name, signal_value in decoded.items():
+                if signal_name.startswith('Cell_') and signal_name.endswith('_Voltage'):
+                    try:
+                        # Extract cell number from signal name (e.g., "Cell_5_Voltage" -> 5)
+                        parts = signal_name.split('_')
+                        if len(parts) >= 3:
+                            cell_num_global = int(parts[1])  # Global cell number (1-108)
+                            
+                            # Map global cell number to module and cell index
+                            # Cells 1-18 -> Module 0, Cells 19-36 -> Module 1, etc.
+                            module_id = (cell_num_global - 1) // 18
+                            cell_idx = (cell_num_global - 1) % 18
+                            
+                            if 0 <= module_id < 6 and 0 <= cell_idx < 18:
+                                self._update_single_cell_voltage(module_id, cell_idx, signal_value, current_time)
+                    except (ValueError, IndexError):
+                        pass  # Skip malformed signal names
+            
+            # Legacy support: BQ76952 messages (if still present)
             # BQ76952_Stack_Voltage (0x731/1841)
             if can_id == 0x731:
                 if 'Stack_Voltage' in decoded:
                     self.stack_voltage = decoded['Stack_Voltage']  # in mV
-                    self._update_stack_voltage_display(self.stack_voltage, current_time)
             
-            # BQ76952_Cell_Voltages_1_4 (0x732/1842) - Cells 1-4
+            # BQ76952_Cell_Voltages_1_4 (0x732/1842) - Cells 1-4 (Module 0, Cells 0-3)
             elif can_id == 0x732:
                 for i in range(1, 5):
                     key = f'Cell_{i}_Voltage'
                     if key in decoded:
-                        self._update_single_cell_voltage(i, decoded[key], current_time)
+                        module_id = 0
+                        cell_idx = i - 1
+                        self._update_single_cell_voltage(module_id, cell_idx, decoded[key], current_time)
             
-            # BQ76952_Cell_Voltages_5_8 (0x733/1843) - Cells 5-8
+            # BQ76952_Cell_Voltages_5_8 (0x733/1843) - Cells 5-8 (Module 0, Cells 4-7)
             elif can_id == 0x733:
                 for i in range(5, 9):
                     key = f'Cell_{i}_Voltage'
                     if key in decoded:
-                        self._update_single_cell_voltage(i, decoded[key], current_time)
+                        module_id = 0
+                        cell_idx = i - 1
+                        self._update_single_cell_voltage(module_id, cell_idx, decoded[key], current_time)
             
-            # BQ76952_Cell_Voltages_9_12 (0x734/1844) - Cells 9-12
+            # BQ76952_Cell_Voltages_9_12 (0x734/1844) - Cells 9-12 (Module 0, Cells 8-11)
             elif can_id == 0x734:
                 for i in range(9, 13):
                     key = f'Cell_{i}_Voltage'
                     if key in decoded:
-                        self._update_single_cell_voltage(i, decoded[key], current_time)
+                        module_id = 0
+                        cell_idx = i - 1
+                        self._update_single_cell_voltage(module_id, cell_idx, decoded[key], current_time)
             
-            # BQ76952_Cell_Voltages_13_16 (0x735/1845) - Cells 13-16
+            # BQ76952_Cell_Voltages_13_16 (0x735/1845) - Cells 13-16 (Module 0, Cells 12-15)
             elif can_id == 0x735:
                 for i in range(13, 17):
                     key = f'Cell_{i}_Voltage'
                     if key in decoded:
-                        self._update_single_cell_voltage(i, decoded[key], current_time)
+                        module_id = 0
+                        cell_idx = i - 1
+                        self._update_single_cell_voltage(module_id, cell_idx, decoded[key], current_time)
             
         except Exception as e:
             # Message not in DBC or decode error - silently ignore
             pass
     
-    def _update_stack_voltage_display(self, voltage_mv: float, time_str: str):
-        """Update stack voltage display."""
-        if voltage_mv is None:
-            return
+    def _update_single_cell_voltage(self, module_id: int, cell_idx: int, voltage_mv: float, time_str: str):
+        """Update a single cell voltage display.
         
-        self.stack_voltage = voltage_mv
-        voltage_v = voltage_mv / 1000.0
-        
-        # Update GUI
-        dpg.set_value("stack_voltage_display", f"{voltage_v:.3f} V")
-        dpg.set_value("stack_voltage_mv_display", f"({voltage_mv:.0f} mV)")
-        
-        # Color based on voltage level (assuming ~16 cells * 3.7V nominal = ~59V)
-        if voltage_v < 48.0:  # Very low (< 3.0V per cell)
-            color = (255, 100, 100)  # Red
-        elif voltage_v < 52.8:  # Low (< 3.3V per cell)
-            color = (255, 200, 100)  # Orange
-        elif voltage_v < 67.2:  # Normal (3.3-4.2V per cell)
-            color = (100, 255, 100)  # Green
-        else:  # High (> 4.2V per cell)
-            color = (255, 100, 255)  # Magenta
-        
-        dpg.configure_item("stack_voltage_display", color=color)
-    
-    def _update_single_cell_voltage(self, cell_num: int, voltage_mv: float, time_str: str):
-        """Update a single cell voltage display."""
-        if cell_num < 1 or cell_num > 16:
+        Args:
+            module_id: Module ID (0-5)
+            cell_idx: Cell index within module (0-17)
+            voltage_mv: Voltage in millivolts
+            time_str: Timestamp string (not displayed in compact view)
+        """
+        if module_id < 0 or module_id >= 6 or cell_idx < 0 or cell_idx >= 18:
             return
         
         # Update stored value
-        self.cell_voltages[cell_num - 1] = voltage_mv
+        self.cell_voltages[module_id][cell_idx] = voltage_mv
         
         voltage_v = voltage_mv / 1000.0
         
         # Update GUI
-        voltage_tag = f"cell_voltage_{cell_num}"
+        voltage_tag = f"cell_m{module_id}_v_{cell_idx}"
         dpg.set_value(voltage_tag, f"{voltage_v:.4f} V")
-        dpg.set_value(f"cell_mv_{cell_num}", f"{voltage_mv:.0f} mV")
-        dpg.set_value(f"cell_time_{cell_num}", f"Last: {time_str}")
         
         # Color based on voltage level
         cell_color = self._get_cell_voltage_color(voltage_v)
@@ -1081,66 +1753,76 @@ class PCANExplorerGUI:
             return (255, 100, 255)  # Very high - magenta
     
     def _update_cell_voltage_stats(self):
-        """Update cell voltage statistics display."""
-        valid_voltages = [v for v in self.cell_voltages if v is not None]
+        """Update cell voltage statistics display for all 108 cells across 6 modules."""
+        # Flatten all cell voltages
+        valid_voltages = []
+        for module in self.cell_voltages:
+            for v in module:
+                if v is not None:
+                    valid_voltages.append(v)
+        
+        # Calculate stack voltage from sum of cells
+        stack_v = sum(valid_voltages) / 1000.0 if valid_voltages else 0.0
         
         if not valid_voltages:
-            stats_text = "Active: 0/16 | Min: -.--- V | Max: -.--- V | Avg: -.--- V | Delta: -.--- V"
+            stats_text = "Active: 0/108 | Stack: ---.--- V | Min: -.--- V | Max: -.--- V | Avg: -.--- V | Delta: -.--- V"
         else:
             active = len(valid_voltages)
             min_v = min(valid_voltages) / 1000.0
             max_v = max(valid_voltages) / 1000.0
             avg_v = sum(valid_voltages) / len(valid_voltages) / 1000.0
             delta_v = (max_v - min_v)
-            stats_text = f"Active: {active}/16 | Min: {min_v:.4f} V | Max: {max_v:.4f} V | Avg: {avg_v:.4f} V | Delta: {delta_v:.4f} V"
+            stats_text = f"Active: {active}/108 | Stack: {stack_v:.3f} V | Min: {min_v:.4f} V | Max: {max_v:.4f} V | Avg: {avg_v:.4f} V | Delta: {delta_v:.4f} V"
         
         dpg.set_value("cell_stats", stats_text)
     
     def _clear_cell_voltage_data(self):
-        """Clear all cell voltage data."""
-        self.cell_voltages = [None] * 16
+        """Clear all cell voltage data for all 108 cells."""
+        self.cell_voltages = [[None] * 18 for _ in range(6)]
         self.stack_voltage = None
         
-        # Clear stack voltage
-        dpg.set_value("stack_voltage_display", "---.--- V")
-        dpg.set_value("stack_voltage_mv_display", "(------- mV)")
-        dpg.configure_item("stack_voltage_display", color=(255, 255, 100))
-        
-        # Clear individual cells
-        for i in range(1, 17):
-            dpg.set_value(f"cell_voltage_{i}", "-.---- V")
-            dpg.configure_item(f"cell_voltage_{i}", color=(100, 255, 100))
-            dpg.set_value(f"cell_mv_{i}", "---- mV")
-            dpg.set_value(f"cell_time_{i}", "Last: Never")
+        # Clear individual cells for all modules
+        for module_id in range(6):
+            for cell_idx in range(18):
+                voltage_tag = f"cell_m{module_id}_v_{cell_idx}"
+                dpg.set_value(voltage_tag, "-.---- V")
+                dpg.configure_item(voltage_tag, color=(100, 255, 180))  # Vibrant mint green
         
         self._update_cell_voltage_stats()
     
     def _export_cell_voltage_data(self):
-        """Export current cell voltages to CSV."""
+        """Export current cell voltages to CSV for all 108 cells."""
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"cell_voltages_{timestamp}.csv"
             
             with open(filename, 'w') as f:
-                f.write("Cell_Number,Voltage_V,Voltage_mV,Status\n")
+                f.write("Module,Cell_Index,Cell_Label,Voltage_V,Voltage_mV,Status\n")
                 
-                # Stack voltage
-                if self.stack_voltage is not None:
-                    f.write(f"Stack,{self.stack_voltage/1000.0:.3f},{self.stack_voltage:.0f},Active\n")
-                else:
-                    f.write(f"Stack,,,No Data\n")
+                # Calculate stack voltage
+                valid_voltages = []
+                for module in self.cell_voltages:
+                    for v in module:
+                        if v is not None:
+                            valid_voltages.append(v)
                 
+                stack_v = sum(valid_voltages) / 1000.0 if valid_voltages else 0.0
+                stack_mv = sum(valid_voltages) if valid_voltages else 0.0
+                
+                # Stack voltage summary
+                f.write(f"ALL,ALL,Stack,{stack_v:.3f},{stack_mv:.0f},Active\n")
                 f.write("\n")
                 
-                # Individual cells
-                for i in range(16):
-                    cell_num = i + 1
-                    voltage_mv = self.cell_voltages[i]
-                    if voltage_mv is not None:
-                        voltage_v = voltage_mv / 1000.0
-                        f.write(f"{cell_num},{voltage_v:.4f},{voltage_mv:.0f},Active\n")
-                    else:
-                        f.write(f"{cell_num},,,No Data\n")
+                # Individual cells for each module
+                for module_id in range(6):
+                    for cell_idx in range(18):
+                        voltage_mv = self.cell_voltages[module_id][cell_idx]
+                        cell_label = f"M{module_id}_C{cell_idx+1}"
+                        if voltage_mv is not None:
+                            voltage_v = voltage_mv / 1000.0
+                            f.write(f"{module_id},{cell_idx},{cell_label},{voltage_v:.4f},{voltage_mv:.0f},Active\n")
+                        else:
+                            f.write(f"{module_id},{cell_idx},{cell_label},,,No Data\n")
             
             self._show_popup("Export Success", f"Saved: {filename}")
         except Exception as e:
@@ -1193,17 +1875,24 @@ Examples:
         '''
     )
     
-    parser.add_argument('--device', type=str, default='pcan',
+    parser.add_argument('--device', type=str, default=None,
                        choices=['pcan', 'canable'],
-                       help='CAN adapter type (default: pcan)')
+                       help='CAN adapter type (default: from config or pcan)')
     parser.add_argument('--channel', type=str, default=None,
                        help='PCAN channel (e.g., USB1) or CANable device index (e.g., 0, 1, 2)')
     
     args = parser.parse_args()
     
-    # Validate device availability
-    device_type = args.device.lower()
+    # Load config to check for saved preferences
+    config = PCANExplorerGUI._load_config_static()
     
+    # Use command-line args if provided, otherwise use config, otherwise use defaults
+    if args.device:
+        device_type = args.device.lower()
+    else:
+        device_type = config.get('device_type', 'pcan')
+    
+    # Validate device availability
     if device_type == 'pcan' and not PCAN_AVAILABLE:
         print("Error: PCAN driver not available")
         print("Please ensure PCAN_Driver.py exists in drivers/ directory")
@@ -1214,14 +1903,11 @@ Examples:
         print("Please ensure CANable_Driver.py exists in drivers/ directory")
         sys.exit(1)
     
-    # Set default channel based on device type
+    # Set channel - use command-line arg if provided, otherwise let __init__ use config
     if args.channel:
         channel = args.channel
     else:
-        if device_type == 'pcan':
-            channel = PCANChannel.USB1
-        else:
-            channel = 0  # Default to first CANable device
+        channel = None  # Let __init__ use config value
     
     # Convert PCAN channel string to enum if needed
     if device_type == 'pcan' and isinstance(channel, str):
