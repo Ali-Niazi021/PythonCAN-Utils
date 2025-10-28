@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from typing import Optional, List, Callable
 import time
 import threading
+import asyncio
+import inspect
 
 
 try:
@@ -395,7 +397,25 @@ class PCANDriver:
             try:
                 msg = self.read_message(timeout=0.1)
                 if msg and self._receive_callback:
-                    self._receive_callback(msg)
+                    # Check if callback is async
+                    if inspect.iscoroutinefunction(self._receive_callback):
+                        # Run async callback in the event loop
+                        try:
+                            loop = asyncio.get_event_loop()
+                            if loop.is_running():
+                                asyncio.run_coroutine_threadsafe(
+                                    self._receive_callback(msg), 
+                                    loop
+                                )
+                            else:
+                                # Fallback: create new event loop
+                                asyncio.run(self._receive_callback(msg))
+                        except RuntimeError:
+                            # No event loop available, create one
+                            asyncio.run(self._receive_callback(msg))
+                    else:
+                        # Synchronous callback
+                        self._receive_callback(msg)
             except Exception as e:
                 if not self._stop_receive:
                     print(f"Error in receive loop: {str(e)}")

@@ -1,0 +1,96 @@
+.cell-voltage-monitor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #0a0a0a;
+  border: 1px solid #1a1a1a;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.stats-bar .stat-item.highlight {
+  background: rgba(220, 38, 38, 0.15);
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.voltage-grid-container {
+  flex: 1;
+  overflow: auto;
+  padding: 20px;
+  min-height: 0;
+}
+
+.voltage-grid {
+  display: flex;
+  gap: 12px;
+  min-width: fit-content;
+}
+
+.cell-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  gap: 4px;
+  padding: 12px;
+  max-height: none;
+}
+
+.voltage-cell {
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  padding: 12px;
+  transition: all 0.3s ease;
+  cursor: pointer;
+  border: 1px solid rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.voltage-cell:hover {
+  transform: scale(1.08);
+  z-index: 10;
+  box-shadow: 0 6px 16px rgba(220, 38, 38, 0.4);
+}
+
+.cell-num {
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.8;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+
+.voltage-value {
+  font-size: 14px;
+  font-weight: 700;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+@media (max-width: 1200px) {
+  .voltage-grid {
+    flex-direction: column;
+  }
+
+  .module-column {
+    min-width: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  .cell-list {
+    grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+  }
+
+  .voltage-cell {
+    padding: 8px;
+  }
+
+  .voltage-value {
+    font-size: 12px;
+  }
+}

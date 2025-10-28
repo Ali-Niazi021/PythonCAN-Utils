@@ -1,0 +1,175 @@
+.thermistor-monitor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #0a0a0a;
+  border: 1px solid #1a1a1a;
+  border-radius: 8px;
+  overflow: auto;
+  min-height: 0;
+}
+
+.stats-bar {
+  display: flex;
+  gap: 24px;
+  padding: 16px 20px;
+  background: #000000;
+  border-bottom: 1px solid #1a1a1a;
+  flex-wrap: wrap;
+}
+
+.stat-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.stat-label {
+  color: #888;
+  font-weight: 500;
+}
+
+.stat-value {
+  color: #f5f5f5;
+  font-weight: 600;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+.thermistor-grid-container {
+  flex: 1;
+  overflow: auto;
+  padding: 20px;
+  min-height: 0;
+}
+
+.thermistor-grid {
+  display: flex;
+  gap: 12px;
+  min-width: fit-content;
+}
+
+.module-column {
+  flex: 1;
+  min-width: 180px;
+  background: #141414;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #2a2a2a;
+}
+
+.module-header {
+  background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+  color: white;
+  padding: 10px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 14px;
+  border-bottom: 2px solid #dc2626;
+}
+
+.channel-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 2px;
+  padding: 8px;
+  max-height: none;
+}
+
+.thermistor-cell {
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  padding: 8px;
+  transition: all 0.3s ease;
+  cursor: pointer;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+.thermistor-cell:hover {
+  transform: scale(1.1);
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.4);
+}
+
+.channel-num {
+  font-size: 10px;
+  font-weight: 600;
+  opacity: 0.7;
+  margin-bottom: 2px;
+}
+
+.temp-value {
+  font-size: 13px;
+  font-weight: 700;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+.legend {
+  padding: 16px 20px;
+  background: #000000;
+  border-top: 1px solid #1a1a1a;
+}
+
+.legend-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #888;
+  margin-bottom: 12px;
+}
+
+.legend-items {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #f5f5f5;
+}
+
+.legend-color {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.3);
+}
+
+@media (max-width: 1200px) {
+  .thermistor-grid {
+    flex-direction: column;
+  }
+
+  .module-column {
+    min-width: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  .stats-bar {
+    gap: 12px;
+  }
+
+  .stat-item {
+    font-size: 12px;
+  }
+
+  .channel-list {
+    grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+  }
+
+  .thermistor-cell {
+    padding: 4px;
+  }
+
+  .temp-value {
+    font-size: 11px;
+  }
+}

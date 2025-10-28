@@ -1,0 +1,18 @@
+{
+  "dbc_file": "BMS-Firmware-RTOS-Complete.dbc",
+  "items": [
+    {
+      "id": "1761627150856-0.5786241744309557",
+      "can_id": 149950211,
+      "data": [
+        0
+      ],
+      "is_extended": true,
+      "message_name": "BMS_Chip_Reset_Command_0",
+      "signals": {
+        "Reset_Request": 0
+      },
+      "description": "DBC: BMS_Chip_Reset_Command_0"
+    }
+  ]
+}

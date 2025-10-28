@@ -1,8 +1,56 @@
 # PythonCAN-Utils
 
-A comprehensive Python-based CAN bus utility suite for PCAN-USB and CANable adapters, featuring object-oriented drivers, a graphical user interface similar to PCAN-Explorer, and integrated STM32 bootloader firmware flashing.
+A comprehensive Python-based CAN bus utility suite for PCAN-USB and CANable adapters, featuring modern web interface, object-oriented drivers, and integrated STM32 bootloader firmware flashing.
+
+## 🚀 Quick Start
+
+### Easiest Way - One-Click Launcher
+
+**Just run one command to start everything:**
+
+```bash
+python start.py
+```
+
+Or on Windows, simply **double-click `start.bat`**
+
+This will:
+- ✅ Check for Node.js and npm
+- ✅ Install frontend dependencies (first time only)
+- ✅ Start the backend server (port 8000)
+- ✅ Start the frontend server (port 3001)
+- ✅ Open your browser automatically
+
+**That's it!** The application will be ready at http://localhost:3001
+
+### Manual Start (Alternative)
+
+If you prefer to start servers separately:
+
+```bash
+# Terminal 1 - Backend
+cd webserver/backend
+python api.py
+
+# Terminal 2 - Frontend
+cd webserver/frontend
+set PORT=3001  # Windows
+# export PORT=3001  # Linux/Mac
+npm start
+```
 
 ## Features
+
+### Modern Web Interface
+- **Beautiful React UI**: Modern, responsive web interface
+- **Real-time Updates**: WebSocket for live CAN message streaming
+- **File Upload**: Drag-and-drop DBC file support
+- **Expandable Details**: Click to see all decoded signals
+- **Sidebar Layout**: Maximized message list space
+- **3 Main Views**:
+  - CAN Explorer - Send/receive messages with DBC decoding
+  - Thermistor Monitor - 336 channels across 6 modules
+  - Cell Voltage Monitor - 108 cells across 6 modules
 
 ### Dual CAN Adapter Support
 - **PCAN-USB**: Professional USB-to-CAN adapter from PEAK-System
