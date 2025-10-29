@@ -17,7 +17,7 @@ import asyncio
 import json
 from enum import Enum
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -52,6 +52,14 @@ try:
 except ImportError:
     CANABLE_AVAILABLE = False
     print("Warning: CANable_Driver not available")
+
+# Import firmware flasher
+try:
+    from drivers.Firmware_Flasher import FirmwareFlasher
+    FIRMWARE_FLASHER_AVAILABLE = True
+except ImportError:
+    FIRMWARE_FLASHER_AVAILABLE = False
+    print("Warning: Firmware_Flasher not available")
 
 # Import DBC support
 try:
@@ -197,6 +205,13 @@ class DBCMessagesResponse(BaseModel):
     """Response containing DBC message list"""
     success: bool
     messages: List[DBCMessageInfo]
+
+
+class FirmwareFlashResponse(BaseModel):
+    """Response from firmware flash operation"""
+    success: bool
+    message: str
+    error: Optional[str] = None
 
 
 # ============================================================================
@@ -887,6 +902,90 @@ async def encode_message(message_name: str, signals: str):
         raise HTTPException(status_code=400, detail=f"Invalid signals JSON: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to encode message: {str(e)}")
+
+
+@app.post("/flash_firmware", response_model=FirmwareFlashResponse)
+async def flash_firmware(file: UploadFile = File(...), module_number: int = Form(0)):
+    """Flash firmware to a BMS module"""
+    print(f"[FLASH] Starting firmware flash for module {module_number}, file: {file.filename}")
+    
+    if not FIRMWARE_FLASHER_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Firmware flasher not available")
+    
+    if not backend.is_connected:
+        raise HTTPException(status_code=400, detail="CAN bus not connected")
+    
+    if not backend.driver:
+        raise HTTPException(status_code=500, detail="No CAN driver available")
+    
+    # Validate module number (0-5 for TREV BMS)
+    if not 0 <= module_number <= 5:
+        raise HTTPException(status_code=400, detail="Module number must be between 0 and 5")
+    
+    # Validate file is .bin
+    if not file.filename.endswith('.bin'):
+        raise HTTPException(status_code=400, detail="File must be a .bin firmware file")
+    
+    try:
+        # Save uploaded file temporarily
+        temp_dir = Path(__file__).parent / "temp"
+        temp_dir.mkdir(exist_ok=True)
+        temp_file_path = temp_dir / file.filename
+        
+        print(f"[FLASH] Saving file to {temp_file_path}")
+        with open(temp_file_path, 'wb') as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        file_size = temp_file_path.stat().st_size
+        print(f"[FLASH] File saved, size: {file_size} bytes")
+        
+        # Create firmware flasher with progress callback
+        def progress_callback(progress):
+            # TODO: Send progress updates via WebSocket
+            print(f"[FLASH] Progress: {progress.stage} - {progress.progress}% - {progress.message}")
+        
+        print(f"[FLASH] Creating FirmwareFlasher instance")
+        flasher = FirmwareFlasher(backend.driver, progress_callback)
+        
+        print(f"[FLASH] Starting flash_firmware() call")
+        # Flash the firmware (with verify and jump to application)
+        # Pass Path object, not string
+        success = flasher.flash_firmware(
+            firmware_path=temp_file_path,  # Pass Path object directly
+            module_number=module_number,
+            verify=True,
+            jump=True
+        )
+        
+        if not success:
+            print(f"[FLASH] Flash failed - flasher returned False")
+            raise Exception("Firmware flash operation failed")
+        
+        print(f"[FLASH] Flash completed successfully")
+        # Clean up temp file
+        temp_file_path.unlink(missing_ok=True)
+        
+        return FirmwareFlashResponse(
+            success=True,
+            message=f"Firmware successfully flashed to module {module_number}"
+        )
+        
+    except FileNotFoundError as e:
+        # Clean up temp file on error
+        if 'temp_file_path' in locals():
+            temp_file_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=404, detail=f"Firmware file not found: {str(e)}")
+    except Exception as e:
+        # Clean up temp file on error
+        if 'temp_file_path' in locals():
+            temp_file_path.unlink(missing_ok=True)
+        
+        # Log the full error for debugging
+        import traceback
+        print(f"Firmware flash error: {str(e)}")
+        print(traceback.format_exc())
+        
+        raise HTTPException(status_code=500, detail=f"Firmware flash failed: {str(e)}")
 
 
 # ============================================================================

@@ -74,11 +74,7 @@ function App() {
   const connectWebSocket = useCallback(() => {
     websocketService.connect((message) => {
       // Handle incoming CAN message
-      setMessages(prev => {
-        const newMessages = [...prev, message];
-        // Keep last 1000 messages
-        return newMessages.slice(-1000);
-      });
+      setMessages(prev => [...prev, message]);
     });
   }, []);
 
@@ -121,7 +117,7 @@ function App() {
         baudrate: null,
         status: 'Disconnected'
       });
-      setMessages([]);
+      // Don't clear messages on disconnect - they persist until manually cleared
       return true;
     } catch (error) {
       console.error('Disconnect failed:', error);

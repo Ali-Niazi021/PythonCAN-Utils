@@ -60,24 +60,6 @@ BO_ 2297433859 BMS_Chip_Reset_Command_0: 1 CAN_Host
 BO_ 2297433860 BMS_Chip_Reset_ACK_0: 8 BMS_Module_0
  SG_ Status : 0|8@1+ (1,0) [0|255] "" CAN_Host
 
-BO_ 2297433861 BMS_Chip_Init_Command_0: 1 CAN_Host
- SG_ Init_Request : 0|8@1+ (1,0) [0|255] "" BMS_Module_0
-
-BO_ 2297433862 BMS_Chip_Init_ACK_0: 8 BMS_Module_0
- SG_ BMS1_Error_Code : 0|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ BMS2_Error_Code : 8|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ BMS1_I2C_Error : 16|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ BMS2_I2C_Error : 24|8@1+ (1,0) [0|255] "" CAN_Host
-
-BO_ 2297433863 BMS_Chip_Sleep_Command_0: 8 CAN_Host
- SG_ Chip_Select : 0|8@1+ (1,0) [1|2] "" BMS_Module_0
- SG_ Mode : 8|8@1+ (1,0) [0|3] "" BMS_Module_0
-
-BO_ 2297433864 BMS_Chip_Sleep_ACK_0: 8 BMS_Module_0
- SG_ Status : 0|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ Chip_Select_Echo : 8|8@1+ (1,0) [1|2] "" CAN_Host
- SG_ Mode_Echo : 16|8@1+ (1,0) [0|3] "" CAN_Host
-
 BO_ 2297433873 BMS_Debug_Response_0: 8 BMS_Module_0
  SG_ Module_ID : 0|8@1+ (1,0) [0|15] "" CAN_Host
  SG_ Free_Heap_KB : 8|8@1+ (0.25,0) [0|63.75] "KB" CAN_Host
@@ -260,24 +242,6 @@ BO_ 2297437955 BMS_Chip_Reset_Command_1: 1 CAN_Host
 
 BO_ 2297437956 BMS_Chip_Reset_ACK_1: 8 BMS_Module_1
  SG_ Status : 0|8@1+ (1,0) [0|255] "" CAN_Host
-
-BO_ 2297437957 BMS_Chip_Init_Command_1: 1 CAN_Host
- SG_ Init_Request : 0|8@1+ (1,0) [0|255] "" BMS_Module_1
-
-BO_ 2297437958 BMS_Chip_Init_ACK_1: 8 BMS_Module_1
- SG_ BMS1_Error_Code : 0|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ BMS2_Error_Code : 8|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ BMS1_I2C_Error : 16|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ BMS2_I2C_Error : 24|8@1+ (1,0) [0|255] "" CAN_Host
-
-BO_ 2297437959 BMS_Chip_Sleep_Command_1: 8 CAN_Host
- SG_ Chip_Select : 0|8@1+ (1,0) [1|2] "" BMS_Module_1
- SG_ Mode : 8|8@1+ (1,0) [0|3] "" BMS_Module_1
-
-BO_ 2297437960 BMS_Chip_Sleep_ACK_1: 8 BMS_Module_1
- SG_ Status : 0|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ Chip_Select_Echo : 8|8@1+ (1,0) [1|2] "" CAN_Host
- SG_ Mode_Echo : 16|8@1+ (1,0) [0|3] "" CAN_Host
 
 BO_ 2297437969 BMS_Debug_Response_1: 8 BMS_Module_1
  SG_ Module_ID : 0|8@1+ (1,0) [0|15] "" CAN_Host
@@ -462,24 +426,6 @@ BO_ 2297442051 BMS_Chip_Reset_Command_2: 1 CAN_Host
 BO_ 2297442052 BMS_Chip_Reset_ACK_2: 8 BMS_Module_2
  SG_ Status : 0|8@1+ (1,0) [0|255] "" CAN_Host
 
-BO_ 2297442053 BMS_Chip_Init_Command_2: 1 CAN_Host
- SG_ Init_Request : 0|8@1+ (1,0) [0|255] "" BMS_Module_2
-
-BO_ 2297442054 BMS_Chip_Init_ACK_2: 8 BMS_Module_2
- SG_ BMS1_Error_Code : 0|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ BMS2_Error_Code : 8|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ BMS1_I2C_Error : 16|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ BMS2_I2C_Error : 24|8@1+ (1,0) [0|255] "" CAN_Host
-
-BO_ 2297442055 BMS_Chip_Sleep_Command_2: 8 CAN_Host
- SG_ Chip_Select : 0|8@1+ (1,0) [1|2] "" BMS_Module_2
- SG_ Mode : 8|8@1+ (1,0) [0|3] "" BMS_Module_2
-
-BO_ 2297442056 BMS_Chip_Sleep_ACK_2: 8 BMS_Module_2
- SG_ Status : 0|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ Chip_Select_Echo : 8|8@1+ (1,0) [1|2] "" CAN_Host
- SG_ Mode_Echo : 16|8@1+ (1,0) [0|3] "" CAN_Host
-
 BO_ 2297442065 BMS_Debug_Response_2: 8 BMS_Module_2
  SG_ Module_ID : 0|8@1+ (1,0) [0|15] "" CAN_Host
  SG_ Free_Heap_KB : 8|8@1+ (0.25,0) [0|63.75] "KB" CAN_Host
@@ -662,24 +608,6 @@ BO_ 2297446147 BMS_Chip_Reset_Command_3: 1 CAN_Host
 
 BO_ 2297446148 BMS_Chip_Reset_ACK_3: 8 BMS_Module_3
  SG_ Status : 0|8@1+ (1,0) [0|255] "" CAN_Host
-
-BO_ 2297446149 BMS_Chip_Init_Command_3: 1 CAN_Host
- SG_ Init_Request : 0|8@1+ (1,0) [0|255] "" BMS_Module_3
-
-BO_ 2297446150 BMS_Chip_Init_ACK_3: 8 BMS_Module_3
- SG_ BMS1_Error_Code : 0|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ BMS2_Error_Code : 8|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ BMS1_I2C_Error : 16|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ BMS2_I2C_Error : 24|8@1+ (1,0) [0|255] "" CAN_Host
-
-BO_ 2297446151 BMS_Chip_Sleep_Command_3: 8 CAN_Host
- SG_ Chip_Select : 0|8@1+ (1,0) [1|2] "" BMS_Module_3
- SG_ Mode : 8|8@1+ (1,0) [0|3] "" BMS_Module_3
-
-BO_ 2297446152 BMS_Chip_Sleep_ACK_3: 8 BMS_Module_3
- SG_ Status : 0|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ Chip_Select_Echo : 8|8@1+ (1,0) [1|2] "" CAN_Host
- SG_ Mode_Echo : 16|8@1+ (1,0) [0|3] "" CAN_Host
 
 BO_ 2297446161 BMS_Debug_Response_3: 8 BMS_Module_3
  SG_ Module_ID : 0|8@1+ (1,0) [0|15] "" CAN_Host
@@ -864,24 +792,6 @@ BO_ 2297450243 BMS_Chip_Reset_Command_4: 1 CAN_Host
 BO_ 2297450244 BMS_Chip_Reset_ACK_4: 8 BMS_Module_4
  SG_ Status : 0|8@1+ (1,0) [0|255] "" CAN_Host
 
-BO_ 2297450245 BMS_Chip_Init_Command_4: 1 CAN_Host
- SG_ Init_Request : 0|8@1+ (1,0) [0|255] "" BMS_Module_4
-
-BO_ 2297450246 BMS_Chip_Init_ACK_4: 8 BMS_Module_4
- SG_ BMS1_Error_Code : 0|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ BMS2_Error_Code : 8|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ BMS1_I2C_Error : 16|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ BMS2_I2C_Error : 24|8@1+ (1,0) [0|255] "" CAN_Host
-
-BO_ 2297450247 BMS_Chip_Sleep_Command_4: 8 CAN_Host
- SG_ Chip_Select : 0|8@1+ (1,0) [1|2] "" BMS_Module_4
- SG_ Mode : 8|8@1+ (1,0) [0|3] "" BMS_Module_4
-
-BO_ 2297450248 BMS_Chip_Sleep_ACK_4: 8 BMS_Module_4
- SG_ Status : 0|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ Chip_Select_Echo : 8|8@1+ (1,0) [1|2] "" CAN_Host
- SG_ Mode_Echo : 16|8@1+ (1,0) [0|3] "" CAN_Host
-
 BO_ 2297450257 BMS_Debug_Response_4: 8 BMS_Module_4
  SG_ Module_ID : 0|8@1+ (1,0) [0|15] "" CAN_Host
  SG_ Free_Heap_KB : 8|8@1+ (0.25,0) [0|63.75] "KB" CAN_Host
@@ -1065,24 +975,6 @@ BO_ 2297454339 BMS_Chip_Reset_Command_5: 1 CAN_Host
 BO_ 2297454340 BMS_Chip_Reset_ACK_5: 8 BMS_Module_5
  SG_ Status : 0|8@1+ (1,0) [0|255] "" CAN_Host
 
-BO_ 2297454341 BMS_Chip_Init_Command_5: 1 CAN_Host
- SG_ Init_Request : 0|8@1+ (1,0) [0|255] "" BMS_Module_5
-
-BO_ 2297454342 BMS_Chip_Init_ACK_5: 8 BMS_Module_5
- SG_ BMS1_Error_Code : 0|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ BMS2_Error_Code : 8|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ BMS1_I2C_Error : 16|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ BMS2_I2C_Error : 24|8@1+ (1,0) [0|255] "" CAN_Host
-
-BO_ 2297454343 BMS_Chip_Sleep_Command_5: 8 CAN_Host
- SG_ Chip_Select : 0|8@1+ (1,0) [1|2] "" BMS_Module_5
- SG_ Mode : 8|8@1+ (1,0) [0|3] "" BMS_Module_5
-
-BO_ 2297454344 BMS_Chip_Sleep_ACK_5: 8 BMS_Module_5
- SG_ Status : 0|8@1+ (1,0) [0|255] "" CAN_Host
- SG_ Chip_Select_Echo : 8|8@1+ (1,0) [1|2] "" CAN_Host
- SG_ Mode_Echo : 16|8@1+ (1,0) [0|3] "" CAN_Host
-
 BO_ 2297454353 BMS_Debug_Response_5: 8 BMS_Module_5
  SG_ Module_ID : 0|8@1+ (1,0) [0|15] "" CAN_Host
  SG_ Free_Heap_KB : 8|8@1+ (0.25,0) [0|63.75] "KB" CAN_Host
@@ -1254,10 +1146,6 @@ BA_ "VFrameFormat" BO_ 2297433857 1;
 BA_ "VFrameFormat" BO_ 2297433858 1;
 BA_ "VFrameFormat" BO_ 2297433859 1;
 BA_ "VFrameFormat" BO_ 2297433860 1;
-BA_ "VFrameFormat" BO_ 2297433861 1;
-BA_ "VFrameFormat" BO_ 2297433862 1;
-BA_ "VFrameFormat" BO_ 2297433863 1;
-BA_ "VFrameFormat" BO_ 2297433864 1;
 BA_ "VFrameFormat" BO_ 2297433873 1;
 BA_ "VFrameFormat" BO_ 2297433874 1;
 BA_ "VFrameFormat" BO_ 2297430784 1;
@@ -1289,10 +1177,6 @@ BA_ "VFrameFormat" BO_ 2297437953 1;
 BA_ "VFrameFormat" BO_ 2297437954 1;
 BA_ "VFrameFormat" BO_ 2297437955 1;
 BA_ "VFrameFormat" BO_ 2297437956 1;
-BA_ "VFrameFormat" BO_ 2297437957 1;
-BA_ "VFrameFormat" BO_ 2297437958 1;
-BA_ "VFrameFormat" BO_ 2297437959 1;
-BA_ "VFrameFormat" BO_ 2297437960 1;
 BA_ "VFrameFormat" BO_ 2297437969 1;
 BA_ "VFrameFormat" BO_ 2297437970 1;
 BA_ "VFrameFormat" BO_ 2297434880 1;
@@ -1324,10 +1208,6 @@ BA_ "VFrameFormat" BO_ 2297442049 1;
 BA_ "VFrameFormat" BO_ 2297442050 1;
 BA_ "VFrameFormat" BO_ 2297442051 1;
 BA_ "VFrameFormat" BO_ 2297442052 1;
-BA_ "VFrameFormat" BO_ 2297442053 1;
-BA_ "VFrameFormat" BO_ 2297442054 1;
-BA_ "VFrameFormat" BO_ 2297442055 1;
-BA_ "VFrameFormat" BO_ 2297442056 1;
 BA_ "VFrameFormat" BO_ 2297442065 1;
 BA_ "VFrameFormat" BO_ 2297442066 1;
 BA_ "VFrameFormat" BO_ 2297438976 1;
@@ -1359,10 +1239,6 @@ BA_ "VFrameFormat" BO_ 2297446145 1;
 BA_ "VFrameFormat" BO_ 2297446146 1;
 BA_ "VFrameFormat" BO_ 2297446147 1;
 BA_ "VFrameFormat" BO_ 2297446148 1;
-BA_ "VFrameFormat" BO_ 2297446149 1;
-BA_ "VFrameFormat" BO_ 2297446150 1;
-BA_ "VFrameFormat" BO_ 2297446151 1;
-BA_ "VFrameFormat" BO_ 2297446152 1;
 BA_ "VFrameFormat" BO_ 2297446161 1;
 BA_ "VFrameFormat" BO_ 2297446162 1;
 BA_ "VFrameFormat" BO_ 2297443072 1;
@@ -1394,10 +1270,6 @@ BA_ "VFrameFormat" BO_ 2297450241 1;
 BA_ "VFrameFormat" BO_ 2297450242 1;
 BA_ "VFrameFormat" BO_ 2297450243 1;
 BA_ "VFrameFormat" BO_ 2297450244 1;
-BA_ "VFrameFormat" BO_ 2297450245 1;
-BA_ "VFrameFormat" BO_ 2297450246 1;
-BA_ "VFrameFormat" BO_ 2297450247 1;
-BA_ "VFrameFormat" BO_ 2297450248 1;
 BA_ "VFrameFormat" BO_ 2297450257 1;
 BA_ "VFrameFormat" BO_ 2297450258 1;
 BA_ "VFrameFormat" BO_ 2297447168 1;
@@ -1429,10 +1301,6 @@ BA_ "VFrameFormat" BO_ 2297454337 1;
 BA_ "VFrameFormat" BO_ 2297454338 1;
 BA_ "VFrameFormat" BO_ 2297454339 1;
 BA_ "VFrameFormat" BO_ 2297454340 1;
-BA_ "VFrameFormat" BO_ 2297454341 1;
-BA_ "VFrameFormat" BO_ 2297454342 1;
-BA_ "VFrameFormat" BO_ 2297454343 1;
-BA_ "VFrameFormat" BO_ 2297454344 1;
 BA_ "VFrameFormat" BO_ 2297454353 1;
 BA_ "VFrameFormat" BO_ 2297454354 1;
 BA_ "VFrameFormat" BO_ 2297451264 1;
@@ -1475,60 +1343,6 @@ VAL_ 2297442052 Status 0 "Success" 1 "Failed";
 VAL_ 2297446148 Status 0 "Success" 1 "Failed";
 VAL_ 2297450244 Status 0 "Success" 1 "Failed";
 VAL_ 2297454340 Status 0 "Success" 1 "Failed";
-VAL_ 2297433862 BMS1_Error_Code 0 "Success" 1 "Enter_CONFIG_UPDATE_Failed" 2 "Write_CommIdleTime_Failed" 3 "Write_SleepCurrent_Failed" 4 "Exit_CONFIG_UPDATE_Failed" 5 "I2C_Mutex_Timeout";
-VAL_ 2297433862 BMS2_Error_Code 0 "Success" 1 "Enter_CONFIG_UPDATE_Failed" 2 "Write_CommIdleTime_Failed" 3 "Write_SleepCurrent_Failed" 4 "Exit_CONFIG_UPDATE_Failed" 5 "I2C_Mutex_Timeout";
-VAL_ 2297433862 BMS1_I2C_Error 0 "HAL_OK" 1 "HAL_ERROR" 2 "HAL_BUSY" 3 "HAL_TIMEOUT";
-VAL_ 2297433862 BMS2_I2C_Error 0 "HAL_OK" 1 "HAL_ERROR" 2 "HAL_BUSY" 3 "HAL_TIMEOUT";
-VAL_ 2297437958 BMS1_Error_Code 0 "Success" 1 "Enter_CONFIG_UPDATE_Failed" 2 "Write_CommIdleTime_Failed" 3 "Write_SleepCurrent_Failed" 4 "Exit_CONFIG_UPDATE_Failed" 5 "I2C_Mutex_Timeout";
-VAL_ 2297437958 BMS2_Error_Code 0 "Success" 1 "Enter_CONFIG_UPDATE_Failed" 2 "Write_CommIdleTime_Failed" 3 "Write_SleepCurrent_Failed" 4 "Exit_CONFIG_UPDATE_Failed" 5 "I2C_Mutex_Timeout";
-VAL_ 2297437958 BMS1_I2C_Error 0 "HAL_OK" 1 "HAL_ERROR" 2 "HAL_BUSY" 3 "HAL_TIMEOUT";
-VAL_ 2297437958 BMS2_I2C_Error 0 "HAL_OK" 1 "HAL_ERROR" 2 "HAL_BUSY" 3 "HAL_TIMEOUT";
-VAL_ 2297442054 BMS1_Error_Code 0 "Success" 1 "Enter_CONFIG_UPDATE_Failed" 2 "Write_CommIdleTime_Failed" 3 "Write_SleepCurrent_Failed" 4 "Exit_CONFIG_UPDATE_Failed" 5 "I2C_Mutex_Timeout";
-VAL_ 2297442054 BMS2_Error_Code 0 "Success" 1 "Enter_CONFIG_UPDATE_Failed" 2 "Write_CommIdleTime_Failed" 3 "Write_SleepCurrent_Failed" 4 "Exit_CONFIG_UPDATE_Failed" 5 "I2C_Mutex_Timeout";
-VAL_ 2297442054 BMS1_I2C_Error 0 "HAL_OK" 1 "HAL_ERROR" 2 "HAL_BUSY" 3 "HAL_TIMEOUT";
-VAL_ 2297442054 BMS2_I2C_Error 0 "HAL_OK" 1 "HAL_ERROR" 2 "HAL_BUSY" 3 "HAL_TIMEOUT";
-VAL_ 2297446150 BMS1_Error_Code 0 "Success" 1 "Enter_CONFIG_UPDATE_Failed" 2 "Write_CommIdleTime_Failed" 3 "Write_SleepCurrent_Failed" 4 "Exit_CONFIG_UPDATE_Failed" 5 "I2C_Mutex_Timeout";
-VAL_ 2297446150 BMS2_Error_Code 0 "Success" 1 "Enter_CONFIG_UPDATE_Failed" 2 "Write_CommIdleTime_Failed" 3 "Write_SleepCurrent_Failed" 4 "Exit_CONFIG_UPDATE_Failed" 5 "I2C_Mutex_Timeout";
-VAL_ 2297446150 BMS1_I2C_Error 0 "HAL_OK" 1 "HAL_ERROR" 2 "HAL_BUSY" 3 "HAL_TIMEOUT";
-VAL_ 2297446150 BMS2_I2C_Error 0 "HAL_OK" 1 "HAL_ERROR" 2 "HAL_BUSY" 3 "HAL_TIMEOUT";
-VAL_ 2297450246 BMS1_Error_Code 0 "Success" 1 "Enter_CONFIG_UPDATE_Failed" 2 "Write_CommIdleTime_Failed" 3 "Write_SleepCurrent_Failed" 4 "Exit_CONFIG_UPDATE_Failed" 5 "I2C_Mutex_Timeout";
-VAL_ 2297450246 BMS2_Error_Code 0 "Success" 1 "Enter_CONFIG_UPDATE_Failed" 2 "Write_CommIdleTime_Failed" 3 "Write_SleepCurrent_Failed" 4 "Exit_CONFIG_UPDATE_Failed" 5 "I2C_Mutex_Timeout";
-VAL_ 2297450246 BMS1_I2C_Error 0 "HAL_OK" 1 "HAL_ERROR" 2 "HAL_BUSY" 3 "HAL_TIMEOUT";
-VAL_ 2297450246 BMS2_I2C_Error 0 "HAL_OK" 1 "HAL_ERROR" 2 "HAL_BUSY" 3 "HAL_TIMEOUT";
-VAL_ 2297454342 BMS1_Error_Code 0 "Success" 1 "Enter_CONFIG_UPDATE_Failed" 2 "Write_CommIdleTime_Failed" 3 "Write_SleepCurrent_Failed" 4 "Exit_CONFIG_UPDATE_Failed" 5 "I2C_Mutex_Timeout";
-VAL_ 2297454342 BMS2_Error_Code 0 "Success" 1 "Enter_CONFIG_UPDATE_Failed" 2 "Write_CommIdleTime_Failed" 3 "Write_SleepCurrent_Failed" 4 "Exit_CONFIG_UPDATE_Failed" 5 "I2C_Mutex_Timeout";
-VAL_ 2297454342 BMS1_I2C_Error 0 "HAL_OK" 1 "HAL_ERROR" 2 "HAL_BUSY" 3 "HAL_TIMEOUT";
-VAL_ 2297454342 BMS2_I2C_Error 0 "HAL_OK" 1 "HAL_ERROR" 2 "HAL_BUSY" 3 "HAL_TIMEOUT";
-VAL_ 2297433863 Chip_Select 1 "BMS1" 2 "BMS2";
-VAL_ 2297433863 Mode 0 "EXIT_DEEPSLEEP" 1 "DEEPSLEEP" 2 "SLEEP_ENABLE" 3 "SLEEP_DISABLE";
-VAL_ 2297437959 Chip_Select 1 "BMS1" 2 "BMS2";
-VAL_ 2297437959 Mode 0 "EXIT_DEEPSLEEP" 1 "DEEPSLEEP" 2 "SLEEP_ENABLE" 3 "SLEEP_DISABLE";
-VAL_ 2297442055 Chip_Select 1 "BMS1" 2 "BMS2";
-VAL_ 2297442055 Mode 0 "EXIT_DEEPSLEEP" 1 "DEEPSLEEP" 2 "SLEEP_ENABLE" 3 "SLEEP_DISABLE";
-VAL_ 2297446151 Chip_Select 1 "BMS1" 2 "BMS2";
-VAL_ 2297446151 Mode 0 "EXIT_DEEPSLEEP" 1 "DEEPSLEEP" 2 "SLEEP_ENABLE" 3 "SLEEP_DISABLE";
-VAL_ 2297450247 Chip_Select 1 "BMS1" 2 "BMS2";
-VAL_ 2297450247 Mode 0 "EXIT_DEEPSLEEP" 1 "DEEPSLEEP" 2 "SLEEP_ENABLE" 3 "SLEEP_DISABLE";
-VAL_ 2297454343 Chip_Select 1 "BMS1" 2 "BMS2";
-VAL_ 2297454343 Mode 0 "EXIT_DEEPSLEEP" 1 "DEEPSLEEP" 2 "SLEEP_ENABLE" 3 "SLEEP_DISABLE";
-VAL_ 2297433864 Status 0 "Success" 1 "Failed";
-VAL_ 2297433864 Chip_Select_Echo 1 "BMS1" 2 "BMS2";
-VAL_ 2297433864 Mode_Echo 0 "EXIT_DEEPSLEEP" 1 "DEEPSLEEP" 2 "SLEEP_ENABLE" 3 "SLEEP_DISABLE";
-VAL_ 2297437960 Status 0 "Success" 1 "Failed";
-VAL_ 2297437960 Chip_Select_Echo 1 "BMS1" 2 "BMS2";
-VAL_ 2297437960 Mode_Echo 0 "EXIT_DEEPSLEEP" 1 "DEEPSLEEP" 2 "SLEEP_ENABLE" 3 "SLEEP_DISABLE";
-VAL_ 2297442056 Status 0 "Success" 1 "Failed";
-VAL_ 2297442056 Chip_Select_Echo 1 "BMS1" 2 "BMS2";
-VAL_ 2297442056 Mode_Echo 0 "EXIT_DEEPSLEEP" 1 "DEEPSLEEP" 2 "SLEEP_ENABLE" 3 "SLEEP_DISABLE";
-VAL_ 2297446152 Status 0 "Success" 1 "Failed";
-VAL_ 2297446152 Chip_Select_Echo 1 "BMS1" 2 "BMS2";
-VAL_ 2297446152 Mode_Echo 0 "EXIT_DEEPSLEEP" 1 "DEEPSLEEP" 2 "SLEEP_ENABLE" 3 "SLEEP_DISABLE";
-VAL_ 2297450248 Status 0 "Success" 1 "Failed";
-VAL_ 2297450248 Chip_Select_Echo 1 "BMS1" 2 "BMS2";
-VAL_ 2297450248 Mode_Echo 0 "EXIT_DEEPSLEEP" 1 "DEEPSLEEP" 2 "SLEEP_ENABLE" 3 "SLEEP_DISABLE";
-VAL_ 2297454344 Status 0 "Success" 1 "Failed";
-VAL_ 2297454344 Chip_Select_Echo 1 "BMS1" 2 "BMS2";
-VAL_ 2297454344 Mode_Echo 0 "EXIT_DEEPSLEEP" 1 "DEEPSLEEP" 2 "SLEEP_ENABLE" 3 "SLEEP_DISABLE";
 VAL_ 2297430784 BMS_State 0 "INIT" 1 "IDLE" 2 "CHARGING" 3 "DISCHARGING" 4 "BALANCING" 5 "FAULT" 6 "SHUTDOWN" 7 "RESERVED";
 VAL_ 2297434880 BMS_State 0 "INIT" 1 "IDLE" 2 "CHARGING" 3 "DISCHARGING" 4 "BALANCING" 5 "FAULT" 6 "SHUTDOWN" 7 "RESERVED";
 VAL_ 2297438976 BMS_State 0 "INIT" 1 "IDLE" 2 "CHARGING" 3 "DISCHARGING" 4 "BALANCING" 5 "FAULT" 6 "SHUTDOWN" 7 "RESERVED";

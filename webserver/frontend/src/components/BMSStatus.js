@@ -1,17 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { Activity, AlertTriangle, Thermometer, Zap, TrendingUp, TrendingDown, Info, Send, CheckCircle, XCircle } from 'lucide-react';
 import { apiService } from '../services/api';
+import FirmwareFlasher from './FirmwareFlasher';
 import './BMSStatus.css';
 
 function BMSStatus({ messages, onSendMessage, dbcFile }) {
   const [moduleData, setModuleData] = useState({});
   const [selectedModule, setSelectedModule] = useState('all'); // 'all' or 0-5
   const [commandStatus, setCommandStatus] = useState({}); // Track command responses
+  const [faultHistory, setFaultHistory] = useState({}); // Track all faults with timestamps
 
   useEffect(() => {
     if (!messages || messages.length === 0) return;
 
     const newModuleData = {};
+    const now = Date.now();
 
     // Process messages for all 6 modules
     messages.forEach(msg => {
@@ -60,6 +63,62 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
       // Parse different message types
       if (msgName.startsWith('BMS_Heartbeat_')) {
         newModuleData[moduleId].heartbeat = msg.decoded.signals;
+        
+        // Update fault history when we see a heartbeat
+        const byte0 = msg.decoded.signals.Error_Flags_Byte0?.raw ?? msg.decoded.signals.Error_Flags_Byte0?.value ?? 0;
+        const byte1 = msg.decoded.signals.Error_Flags_Byte1?.raw ?? msg.decoded.signals.Error_Flags_Byte1?.value ?? 0;
+        const byte2 = msg.decoded.signals.Error_Flags_Byte2?.raw ?? msg.decoded.signals.Error_Flags_Byte2?.value ?? 0;
+        const byte3 = msg.decoded.signals.Error_Flags_Byte3?.raw ?? msg.decoded.signals.Error_Flags_Byte3?.value ?? 0;
+
+        const activeFaults = [];
+        
+        // Temperature errors (Byte 0)
+        if (byte0 & 1) activeFaults.push({ type: 'temp', msg: 'Over Temperature', id: 'temp_over' });
+        if (byte0 & 2) activeFaults.push({ type: 'temp', msg: 'Under Temperature', id: 'temp_under' });
+        if (byte0 & 4) activeFaults.push({ type: 'temp', msg: 'Temp Sensor Fault', id: 'temp_sensor' });
+        if (byte0 & 8) activeFaults.push({ type: 'temp', msg: 'Temperature Gradient', id: 'temp_gradient' });
+
+        // Voltage errors (Byte 1)
+        if (byte1 & 1) activeFaults.push({ type: 'voltage', msg: 'Over Voltage', id: 'volt_over' });
+        if (byte1 & 2) activeFaults.push({ type: 'voltage', msg: 'Under Voltage', id: 'volt_under' });
+        if (byte1 & 4) activeFaults.push({ type: 'voltage', msg: 'Voltage Imbalance', id: 'volt_imbalance' });
+        if (byte1 & 8) activeFaults.push({ type: 'voltage', msg: 'Voltage Sensor Fault', id: 'volt_sensor' });
+
+        // Current errors (Byte 2)
+        if (byte2 & 1) activeFaults.push({ type: 'current', msg: 'Over Current Charge', id: 'curr_over_charge' });
+        if (byte2 & 2) activeFaults.push({ type: 'current', msg: 'Over Current Discharge', id: 'curr_over_discharge' });
+        if (byte2 & 4) activeFaults.push({ type: 'current', msg: 'Current Sensor Fault', id: 'curr_sensor' });
+        if (byte2 & 8) activeFaults.push({ type: 'current', msg: 'Short Circuit', id: 'curr_short' });
+
+        // Communication errors (Byte 3)
+        if (byte3 & 1) activeFaults.push({ type: 'comm', msg: 'CAN Bus Off', id: 'can_bus_off' });
+        if (byte3 & 2) activeFaults.push({ type: 'comm', msg: 'CAN TX Timeout', id: 'can_tx_timeout' });
+        if (byte3 & 4) activeFaults.push({ type: 'comm', msg: 'CAN RX Overflow', id: 'can_rx_overflow' });
+        if (byte3 & 8) activeFaults.push({ type: 'comm', msg: 'I2C1 BMS1 Error', id: 'i2c1_bms1' });
+        if (byte3 & 16) activeFaults.push({ type: 'comm', msg: 'I2C3 BMS2 Error', id: 'i2c3_bms2' });
+        if (byte3 & 32) activeFaults.push({ type: 'comm', msg: 'I2C Timeout', id: 'i2c_timeout' });
+        if (byte3 & 64) activeFaults.push({ type: 'comm', msg: 'I2C Fault', id: 'i2c_fault' });
+        if (byte3 & 128) activeFaults.push({ type: 'comm', msg: 'Watchdog Reset', id: 'watchdog' });
+
+        // Update fault history
+        setFaultHistory(prev => {
+          const newHistory = { ...prev };
+          const moduleKey = `module_${moduleId}`;
+          
+          if (!newHistory[moduleKey]) {
+            newHistory[moduleKey] = {};
+          }
+          
+          // Update timestamps for currently active faults
+          activeFaults.forEach(fault => {
+            newHistory[moduleKey][fault.id] = {
+              ...fault,
+              lastSeen: now
+            };
+          });
+          
+          return newHistory;
+        });
       } else if (msgName.startsWith('BMS_CAN_Stats_')) {
         newModuleData[moduleId].canStats = msg.decoded.signals;
       } else if (msgName.startsWith('BMS1_Chip_Status_')) {
@@ -190,6 +249,36 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
     return () => clearInterval(interval);
   }, []);
 
+  // Clear old faults from history after 5 seconds of not being seen
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      setFaultHistory(prev => {
+        const updated = { ...prev };
+        let hasChanges = false;
+        
+        Object.keys(updated).forEach(moduleKey => {
+          Object.keys(updated[moduleKey]).forEach(faultId => {
+            if (now - updated[moduleKey][faultId].lastSeen > 5000) {
+              delete updated[moduleKey][faultId];
+              hasChanges = true;
+            }
+          });
+          
+          // Clean up empty module entries
+          if (Object.keys(updated[moduleKey]).length === 0) {
+            delete updated[moduleKey];
+            hasChanges = true;
+          }
+        });
+        
+        return hasChanges ? updated : prev;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   // Send command functions
   const sendCommand = async (messageName, signals = {}) => {
     if (!dbcFile) {
@@ -295,48 +384,17 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
     return stateMap[state] || 'state-unknown';
   };
 
-  const getErrorFlags = (heartbeat) => {
-    if (!heartbeat) return [];
+  const getErrorFlags = (moduleId) => {
+    if (moduleId === null || moduleId === undefined) return [];
     
-    const flags = [];
-    // Use .raw for numeric values, not .value (which may be decoded enums)
-    const byte0 = heartbeat.Error_Flags_Byte0?.raw ?? heartbeat.Error_Flags_Byte0?.value ?? 0;
-    const byte1 = heartbeat.Error_Flags_Byte1?.raw ?? heartbeat.Error_Flags_Byte1?.value ?? 0;
-    const byte2 = heartbeat.Error_Flags_Byte2?.raw ?? heartbeat.Error_Flags_Byte2?.value ?? 0;
-    const byte3 = heartbeat.Error_Flags_Byte3?.raw ?? heartbeat.Error_Flags_Byte3?.value ?? 0;
-
-    // Temperature errors (Byte 0)
-    if (byte0 & 1) flags.push({ type: 'temp', msg: 'Over Temperature' });
-    if (byte0 & 2) flags.push({ type: 'temp', msg: 'Under Temperature' });
-    if (byte0 & 4) flags.push({ type: 'temp', msg: 'Temp Sensor Fault' });
-    if (byte0 & 8) flags.push({ type: 'temp', msg: 'Temperature Gradient' });
-
-    // Voltage errors (Byte 1)
-    if (byte1 & 1) flags.push({ type: 'voltage', msg: 'Over Voltage' });
-    if (byte1 & 2) flags.push({ type: 'voltage', msg: 'Under Voltage' });
-    if (byte1 & 4) flags.push({ type: 'voltage', msg: 'Voltage Imbalance' });
-    if (byte1 & 8) flags.push({ type: 'voltage', msg: 'Voltage Sensor Fault' });
-
-    // Current errors (Byte 2)
-    if (byte2 & 1) flags.push({ type: 'current', msg: 'Over Current Charge' });
-    if (byte2 & 2) flags.push({ type: 'current', msg: 'Over Current Discharge' });
-    if (byte2 & 4) flags.push({ type: 'current', msg: 'Current Sensor Fault' });
-    if (byte2 & 8) flags.push({ type: 'current', msg: 'Short Circuit' });
-
-    // Communication errors (Byte 3)
-    if (byte3 & 1) flags.push({ type: 'comm', msg: 'CAN Bus Off' });
-    if (byte3 & 2) flags.push({ type: 'comm', msg: 'CAN TX Timeout' });
-    if (byte3 & 4) flags.push({ type: 'comm', msg: 'CAN RX Overflow' });
-    if (byte3 & 8) flags.push({ type: 'comm', msg: 'I2C1 BMS1 Error' });
-    if (byte3 & 16) flags.push({ type: 'comm', msg: 'I2C3 BMS2 Error' });
-    if (byte3 & 32) flags.push({ type: 'comm', msg: 'I2C Timeout' });
-    if (byte3 & 64) flags.push({ type: 'comm', msg: 'I2C Fault' });
-    if (byte3 & 128) flags.push({ type: 'comm', msg: 'Watchdog Reset' });
-
-    return flags;
+    // Return all faults from history for this module
+    const moduleKey = `module_${moduleId}`;
+    const moduleFaults = faultHistory[moduleKey] || {};
+    
+    return Object.values(moduleFaults);
   };
 
-  const errorFlags = getErrorFlags(heartbeat);
+  const errorFlags = getErrorFlags(isAllModulesView ? null : selectedModule);
 
   return (
     <div className="bms-status">
@@ -664,8 +722,8 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
                   const modFaultCount = modData.heartbeat?.Fault_Count?.value || 0;
                   const hasFault = modFaultCount > 0 || modState === 'FAULT';
                   
-                  // Get error flags for this module
-                  const modErrorFlags = getErrorFlags(modData.heartbeat);
+                  // Get error flags for this module from history
+                  const modErrorFlags = getErrorFlags(moduleId);
 
                   return (
                     <div key={moduleId} className={`module-card ${hasFault ? 'has-fault' : 'active'}`}>
@@ -807,6 +865,14 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
             </div>
           )}
         </div>
+      )}
+
+      {/* Firmware Flasher - Always show for individual module view */}
+      {!isAllModulesView && (
+        <FirmwareFlasher 
+          moduleId={selectedModule} 
+          disabled={!dbcFile}
+        />
       )}
     </div>
   );

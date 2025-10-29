@@ -13,6 +13,32 @@
         "Reset_Request": 0
       },
       "description": "DBC: BMS_Chip_Reset_Command_0"
+    },
+    {
+      "id": "1761705819982-0.26273620900362193",
+      "can_id": 149950210,
+      "data": [
+        0
+      ],
+      "is_extended": true,
+      "message_name": "BMS_Reset_Command_0",
+      "signals": {
+        "Reset_Magic": 0
+      },
+      "description": "DBC: BMS_Reset_Command_0"
+    },
+    {
+      "id": "1761714730899-0.23839075561850454",
+      "can_id": 149950213,
+      "data": [
+        0
+      ],
+      "is_extended": true,
+      "message_name": "BQ_Config_Dump_Command_0",
+      "signals": {
+        "BMS_Select": 0
+      },
+      "description": "DBC: BQ_Config_Dump_Command_0"
     }
   ]
 }

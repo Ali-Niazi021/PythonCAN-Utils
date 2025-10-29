@@ -114,6 +114,17 @@ class ApiService {
     });
     return response.data;
   }
+
+  async flashFirmware(formData, onUploadProgress) {
+    const response = await this.client.post('/flash_firmware', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      onUploadProgress: onUploadProgress,
+      timeout: 300000, // 5 minute timeout for flash operation
+    });
+    return response.data;
+  }
 }
 
 export const apiService = new ApiService();
