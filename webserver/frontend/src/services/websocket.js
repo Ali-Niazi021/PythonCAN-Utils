@@ -1,4 +1,30 @@
-const WS_URL = process.env.REACT_APP_WS_URL || 'ws://localhost:8000/ws/can';
+// Dynamically determine WebSocket URL
+// If REACT_APP_WS_URL is set, use it (for custom deployments)
+// Otherwise, use the current host (works for localhost and remote access)
+const getWebSocketUrl = () => {
+  if (process.env.REACT_APP_WS_URL) {
+    console.log('[WebSocket] Using environment variable WS URL:', process.env.REACT_APP_WS_URL);
+    return process.env.REACT_APP_WS_URL;
+  }
+  
+  // Use current window location to build WebSocket URL
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = window.location.hostname; // e.g., localhost or 192.168.1.100
+  const port = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
+  
+  console.log('[WebSocket] Current location:', { protocol, host, port });
+  
+  // If running on dev server (port 3000, 3001, etc.), API is on 8000
+  // If running on production (served from backend), use same port
+  const apiPort = (port.startsWith('3') || port === '5173') ? '8000' : port;
+  
+  const url = `${protocol}//${host}:${apiPort}/ws/can`;
+  console.log('[WebSocket] Constructed WebSocket URL:', url);
+  return url;
+};
+
+const WS_URL = getWebSocketUrl();
+console.log('[WebSocket] Final WebSocket URL:', WS_URL);
 
 class WebSocketService {
   constructor() {

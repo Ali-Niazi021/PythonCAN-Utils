@@ -28,17 +28,62 @@
       "description": "DBC: BMS_Reset_Command_0"
     },
     {
-      "id": "1761714730899-0.23839075561850454",
-      "can_id": 149950213,
+      "id": "1761771911101-0.3890975466130666",
+      "can_id": 149951234,
       "data": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
         0
       ],
       "is_extended": true,
-      "message_name": "BQ_Config_Dump_Command_0",
+      "message_name": "BMS_Config_Status_1",
       "signals": {
-        "BMS_Select": 0
+        "BMS1_Settings_Written": 0,
+        "BMS1_Settings_Verified": 0,
+        "BMS1_Write_Error": 0,
+        "BMS1_Verify_Error": 0,
+        "BMS1_Unseal_Failed": 0,
+        "BMS1_Enter_Cfg_Failed": 0,
+        "BMS1_Exit_Cfg_Failed": 0,
+        "BMS2_Settings_Written": 0,
+        "BMS2_Settings_Verified": 0,
+        "BMS2_Write_Error": 0,
+        "BMS2_Verify_Error": 0,
+        "BMS2_Unseal_Failed": 0,
+        "BMS2_Enter_Cfg_Failed": 0,
+        "BMS2_Exit_Cfg_Failed": 0,
+        "BMS1_Write_Err_Count": 0,
+        "BMS1_Verify_Err_Count": 0,
+        "BMS2_Write_Err_Count": 0,
+        "BMS2_Verify_Err_Count": 0,
+        "Failed_Address": 0
       },
-      "description": "DBC: BQ_Config_Dump_Command_0"
+      "description": "DBC: BMS_Config_Status_1"
+    },
+    {
+      "id": "1761771931978-0.38100460912105516",
+      "can_id": 149950224,
+      "data": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "is_extended": true,
+      "message_name": "BMS_Debug_Request",
+      "signals": {
+        "Request_Type": 0
+      },
+      "description": "DBC: BMS_Debug_Request"
     }
   ]
 }

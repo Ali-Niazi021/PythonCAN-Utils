@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Wifi, WifiOff, RefreshCw, Zap } from 'lucide-react';
 import './ConnectionPanel.css';
 
 function ConnectionPanel({ connected, devices, onConnect, onDisconnect, onRefreshDevices }) {
-  const [deviceType, setDeviceType] = useState('pcan');
-  const [channel, setChannel] = useState('USB1');
+  const [deviceType, setDeviceType] = useState('canable');
+  const [channel, setChannel] = useState('Device 0');
   const [baudrate, setBaudrate] = useState('BAUD_500K');
   const [connecting, setConnecting] = useState(false);
 
@@ -13,9 +13,72 @@ function ConnectionPanel({ connected, devices, onConnect, onDisconnect, onRefres
     'BAUD_125K', 'BAUD_100K', 'BAUD_50K', 'BAUD_20K', 'BAUD_10K'
   ];
 
+  // Split devices by type
+  const pcanDevices = devices.filter(d => d.device_type === 'pcan');
+  const canableDevices = devices.filter(d => d.device_type === 'canable');
+
+  // Update channel when devices are loaded or device type changes
+  useEffect(() => {
+    console.log('[ConnectionPanel] useEffect triggered:', { 
+      deviceType, 
+      devicesLength: devices.length,
+      devices: devices 
+    });
+    
+    if (deviceType === 'canable') {
+      const canable = devices.filter(d => d.device_type === 'canable');
+      console.log('[ConnectionPanel] CANable devices found:', canable);
+      if (canable.length > 0) {
+        const firstDevice = canable[0];
+        const newChannel = `Device ${firstDevice.index}: ${firstDevice.description}`;
+        console.log('[ConnectionPanel] Setting CANable channel to:', newChannel);
+        setChannel(newChannel);
+      }
+    } else if (deviceType === 'pcan') {
+      const pcan = devices.filter(d => d.device_type === 'pcan');
+      console.log('[ConnectionPanel] PCAN devices found:', pcan);
+      if (pcan.length > 0) {
+        const newChannel = pcan[0].name;
+        console.log('[ConnectionPanel] Setting PCAN channel to:', newChannel);
+        setChannel(newChannel);
+      }
+    }
+  }, [devices, deviceType]);
+
   const handleConnect = async () => {
     setConnecting(true);
-    const success = await onConnect(deviceType, channel, baudrate);
+    
+    console.log('[ConnectionPanel] handleConnect called:', { deviceType, channel, baudrate });
+    
+    // For CANable, extract the device index from "Device X: Description" format
+    let channelToSend = channel;
+    if (deviceType === 'canable') {
+      if (typeof channel === 'string' && channel.startsWith('Device ')) {
+        try {
+          const parts = channel.split(':')[0].split(' ');
+          channelToSend = parts[1]; // Extract just the number
+          console.log('[ConnectionPanel] Parsed CANable channel:', channelToSend);
+        } catch (e) {
+          console.error('[ConnectionPanel] Failed to parse CANable channel:', e);
+          alert('Invalid channel format. Please select a device from the dropdown.');
+          setConnecting(false);
+          return;
+        }
+      } else {
+        // If channel doesn't match expected format, try to use it as-is
+        console.warn('[ConnectionPanel] Channel does not match expected format:', channel);
+        // Assume it's just a number
+        channelToSend = channel.replace(/\D/g, ''); // Extract only digits
+        if (!channelToSend) {
+          alert('Invalid channel. Please select a CANable device.');
+          setConnecting(false);
+          return;
+        }
+      }
+    }
+    
+    console.log('[ConnectionPanel] Connecting with:', { deviceType, channelToSend, baudrate });
+    const success = await onConnect(deviceType, channelToSend, baudrate);
     setConnecting(false);
     if (!success) {
       alert('Failed to connect. Check device and settings.');
@@ -28,9 +91,6 @@ function ConnectionPanel({ connected, devices, onConnect, onDisconnect, onRefres
     setConnecting(false);
   };
 
-  const pcanDevices = devices.filter(d => d.device_type === 'pcan');
-  const canableDevices = devices.filter(d => d.device_type === 'canable');
-
   return (
     <div className="connection-panel">
       <div className="connection-content">
@@ -40,11 +100,25 @@ function ConnectionPanel({ connected, devices, onConnect, onDisconnect, onRefres
             <select
               value={deviceType}
               onChange={(e) => {
-                setDeviceType(e.target.value);
-                if (e.target.value === 'pcan' && pcanDevices.length > 0) {
-                  setChannel(pcanDevices[0].name);
-                } else if (e.target.value === 'canable' && canableDevices.length > 0) {
-                  setChannel(String(canableDevices[0].index));
+                const newDeviceType = e.target.value;
+                setDeviceType(newDeviceType);
+                
+                // Update channel based on available devices
+                if (newDeviceType === 'pcan') {
+                  const pcan = devices.filter(d => d.device_type === 'pcan');
+                  if (pcan.length > 0) {
+                    setChannel(pcan[0].name);
+                  } else {
+                    setChannel('USB1');
+                  }
+                } else if (newDeviceType === 'canable') {
+                  const canable = devices.filter(d => d.device_type === 'canable');
+                  if (canable.length > 0) {
+                    const firstDevice = canable[0];
+                    setChannel(`Device ${firstDevice.index}: ${firstDevice.description}`);
+                  } else {
+                    setChannel('Device 0');
+                  }
                 }
               }}
               disabled={connected}
@@ -73,13 +147,16 @@ function ConnectionPanel({ connected, devices, onConnect, onDisconnect, onRefres
                 )
               ) : (
                 canableDevices.length > 0 ? (
-                  canableDevices.map(device => (
-                    <option key={device.index} value={String(device.index)}>
-                      Device {device.index}: {device.description}
-                    </option>
-                  ))
+                  canableDevices.map(device => {
+                    const fullName = `Device ${device.index}: ${device.description}`;
+                    return (
+                      <option key={device.index} value={fullName}>
+                        {fullName}
+                      </option>
+                    );
+                  })
                 ) : (
-                  <option value="0">Device 0</option>
+                  <option value="Device 0">Device 0</option>
                 )
               )}
             </select>

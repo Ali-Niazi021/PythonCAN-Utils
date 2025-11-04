@@ -39,6 +39,7 @@ function App() {
   const fetchDevices = async () => {
     try {
       const data = await apiService.getDevices();
+      console.log('[App] Fetched devices:', data.devices);
       setDevices(data.devices || []);
     } catch (error) {
       console.error('Failed to fetch devices:', error);

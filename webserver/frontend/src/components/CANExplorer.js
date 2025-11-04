@@ -28,9 +28,34 @@ function CANExplorer({
   const fileInputRef = useRef(null);
   
   // Connection form state
-  const [deviceType, setDeviceType] = useState('pcan');
-  const [channel, setChannel] = useState('USB1');
+  const [deviceType, setDeviceType] = useState('canable');
+  const [channel, setChannel] = useState('Device 0');
   const [baudrate, setBaudrate] = useState('BAUD_500K');
+
+  // Filter devices by type
+  const pcanDevices = devices.filter(d => d.device_type === 'pcan');
+  const canableDevices = devices.filter(d => d.device_type === 'canable');
+
+  // Update channel when devices are loaded or device type changes
+  useEffect(() => {
+    console.log('[CANExplorer] Device type or devices changed:', { deviceType, devicesCount: devices.length });
+    
+    if (deviceType === 'canable') {
+      const canable = devices.filter(d => d.device_type === 'canable');
+      if (canable.length > 0) {
+        const firstDevice = canable[0];
+        const newChannel = `Device ${firstDevice.index}: ${firstDevice.description}`;
+        console.log('[CANExplorer] Setting CANable channel to:', newChannel);
+        setChannel(newChannel);
+      }
+    } else if (deviceType === 'pcan') {
+      const pcan = devices.filter(d => d.device_type === 'pcan');
+      if (pcan.length > 0) {
+        console.log('[CANExplorer] Setting PCAN channel to:', pcan[0].name);
+        setChannel(pcan[0].name);
+      }
+    }
+  }, [devices, deviceType]);
 
   // Persistent count tracking - survives message array trimming
   const messageCountsRef = useRef(new Map());
@@ -168,20 +193,44 @@ function CANExplorer({
   };
 
   const handleConnectClick = async () => {
-    console.log('Connect button clicked!');
-    console.log('Current state:', { connected, deviceType, channel, baudrate });
+    console.log('[CANExplorer] Connect button clicked:', { connected, deviceType, channel, baudrate });
     
     try {
       if (connected) {
-        console.log('Attempting to disconnect...');
+        console.log('[CANExplorer] Attempting to disconnect...');
         await onDisconnect();
       } else {
-        console.log('Attempting to connect...');
-        const result = await onConnect(deviceType, channel, baudrate);
-        console.log('Connection result:', result);
+        console.log('[CANExplorer] Attempting to connect...');
+        
+        // For CANable, extract device index from "Device X: Description" format
+        let channelToSend = channel;
+        if (deviceType === 'canable') {
+          if (typeof channel === 'string' && channel.startsWith('Device ')) {
+            try {
+              const parts = channel.split(':')[0].split(' ');
+              channelToSend = parts[1]; // Extract just the number
+              console.log('[CANExplorer] Parsed CANable channel:', channelToSend);
+            } catch (e) {
+              console.error('[CANExplorer] Failed to parse CANable channel:', e);
+              alert('Invalid channel format. Please select a device.');
+              return;
+            }
+          } else {
+            // Extract digits only
+            channelToSend = channel.replace(/\D/g, '');
+            if (!channelToSend) {
+              alert('Invalid channel. Please select a CANable device.');
+              return;
+            }
+          }
+        }
+        
+        console.log('[CANExplorer] Connecting with:', { deviceType, channelToSend, baudrate });
+        const result = await onConnect(deviceType, channelToSend, baudrate);
+        console.log('[CANExplorer] Connection result:', result);
       }
     } catch (error) {
-      console.error('Connection error:', error);
+      console.error('[CANExplorer] Connection error:', error);
       alert('Connection failed: ' + error.message);
     }
   };
@@ -253,7 +302,28 @@ function CANExplorer({
               <label>Device Type</label>
               <select 
                 value={deviceType} 
-                onChange={(e) => setDeviceType(e.target.value)}
+                onChange={(e) => {
+                  const newDeviceType = e.target.value;
+                  setDeviceType(newDeviceType);
+                  
+                  // Update channel when device type changes
+                  if (newDeviceType === 'pcan') {
+                    const pcan = devices.filter(d => d.device_type === 'pcan');
+                    if (pcan.length > 0) {
+                      setChannel(pcan[0].name);
+                    } else {
+                      setChannel('USB1');
+                    }
+                  } else if (newDeviceType === 'canable') {
+                    const canable = devices.filter(d => d.device_type === 'canable');
+                    if (canable.length > 0) {
+                      const firstDevice = canable[0];
+                      setChannel(`Device ${firstDevice.index}: ${firstDevice.description}`);
+                    } else {
+                      setChannel('Device 0');
+                    }
+                  }
+                }}
                 disabled={connected}
               >
                 <option value="pcan">PCAN-USB</option>
@@ -263,13 +333,36 @@ function CANExplorer({
 
             <div className="form-group">
               <label>Channel</label>
-              <input
-                type="text"
+              <select
                 value={channel}
                 onChange={(e) => setChannel(e.target.value)}
                 disabled={connected}
-                placeholder="USB1"
-              />
+              >
+                {deviceType === 'pcan' ? (
+                  pcanDevices.length > 0 ? (
+                    pcanDevices.map(device => (
+                      <option key={device.name} value={device.name}>
+                        {device.name} {device.occupied && '(Occupied)'}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="USB1">USB1</option>
+                  )
+                ) : (
+                  canableDevices.length > 0 ? (
+                    canableDevices.map(device => {
+                      const fullName = `Device ${device.index}: ${device.description}`;
+                      return (
+                        <option key={device.index} value={fullName}>
+                          {fullName}
+                        </option>
+                      );
+                    })
+                  ) : (
+                    <option value="Device 0">Device 0</option>
+                  )
+                )}
+              </select>
             </div>
 
             <div className="form-group">

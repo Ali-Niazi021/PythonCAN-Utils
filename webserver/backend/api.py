@@ -234,6 +234,10 @@ class CANBackend:
         # Message statistics
         self.message_count: int = 0
         self.start_time: Optional[datetime] = None
+        
+        # Event loop for async operations from threads
+        self.loop: Optional[asyncio.AbstractEventLoop] = None
+        self.start_time: Optional[datetime] = None
     
     def get_available_devices(self) -> List[DeviceInfo]:
         """Get list of all available CAN devices"""
@@ -299,7 +303,20 @@ class CANBackend:
                 self.driver = CANableDriver()
                 canable_baudrate = CANableBaudRate[baudrate]
                 
-                if not self.driver.connect(int(channel), canable_baudrate):
+                # Handle both formats: "Device X: Description" or just the index number
+                if isinstance(channel, str):
+                    # Extract device index from "Device X: Description" format if needed
+                    if channel.startswith("Device "):
+                        try:
+                            channel_index = int(channel.split(":")[0].split()[1])
+                        except:
+                            channel_index = int(channel)
+                    else:
+                        channel_index = int(channel)
+                else:
+                    channel_index = int(channel)
+                
+                if not self.driver.connect(channel_index, canable_baudrate):
                     return False
             
             else:
@@ -485,8 +502,12 @@ class CANBackend:
         except:
             return None
     
-    async def _on_message_received(self, msg):
-        """Callback for received CAN messages - broadcasts to all WebSocket clients"""
+    def _on_message_received(self, msg):
+        """Callback for received CAN messages - broadcasts to all WebSocket clients
+        
+        This is called from the driver's receive thread, so we need to schedule
+        the async broadcast on the main event loop.
+        """
         self.message_count += 1
         
         # Convert message to JSON-serializable format
@@ -505,8 +526,12 @@ class CANBackend:
             if decoded:
                 message_data['decoded'] = decoded
         
-        # Broadcast to all connected WebSocket clients
-        await self.broadcast_message(message_data)
+        # Schedule broadcast on the event loop (if available)
+        if self.loop and self.loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                self.broadcast_message(message_data),
+                self.loop
+            )
     
     async def broadcast_message(self, message: dict):
         """Broadcast message to all connected WebSocket clients"""
@@ -995,6 +1020,10 @@ async def flash_firmware(file: UploadFile = File(...), module_number: int = Form
 @app.websocket("/ws/can")
 async def websocket_can_messages(websocket: WebSocket):
     """WebSocket endpoint for real-time CAN message streaming"""
+    # Store the current event loop so the receive thread can schedule async tasks
+    if backend.loop is None:
+        backend.loop = asyncio.get_event_loop()
+    
     await backend.add_websocket_connection(websocket)
     
     try:
