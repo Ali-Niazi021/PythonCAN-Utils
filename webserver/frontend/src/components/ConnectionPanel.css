@@ -162,18 +162,43 @@
 }
 
 @media (max-width: 768px) {
+  .connection-panel {
+    padding: 12px;
+  }
+
   .connection-content {
     flex-direction: column;
     align-items: stretch;
+    gap: 12px;
   }
 
   .connection-controls {
     width: 100%;
+    gap: 8px;
   }
 
   .form-group {
     flex: 1;
-    min-width: 120px;
+    min-width: 100px;
+  }
+
+  .form-group label {
+    font-size: 10px;
+    margin-bottom: 4px;
+  }
+
+  .form-group select {
+    padding: 8px 10px;
+    font-size: 14px; /* Prevent zoom on iOS */
+  }
+
+  .btn-connect {
+    min-width: 100px;
+    padding: 10px 16px;
+  }
+
+  .btn-refresh {
+    padding: 8px 10px;
   }
 
   .connection-status {
@@ -182,5 +207,26 @@
 
   .status-indicator {
     justify-content: center;
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  .devices-found {
+    font-size: 10px;
+    text-align: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .connection-controls {
+    flex-direction: column;
+  }
+
+  .form-group {
+    width: 100%;
+  }
+
+  .btn-connect {
+    width: 100%;
   }
 }

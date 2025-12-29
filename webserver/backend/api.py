@@ -439,11 +439,20 @@ class CANBackend:
     def decode_message(self, can_id: int, data: bytes, is_extended: bool = False) -> Optional[dict]:
         """Decode a CAN message using DBC"""
         if not self.dbc_database:
+            print(f"[DECODE] No DBC database loaded")
             return None
         
         try:
-            lookup_id = can_id | 0x80000000 if is_extended else can_id
+            # Cantools stores extended IDs with the extended bit (0x80000000) stripped off
+            # So we need to mask it when looking up extended IDs
+            if is_extended:
+                lookup_id = can_id & 0x1FFFFFFF  # Strip extended bit if present
+            else:
+                lookup_id = can_id
+            
+            print(f"[DECODE] Attempting to decode: can_id=0x{can_id:X}, is_extended={is_extended}, lookup_id=0x{lookup_id:X}")
             message = self.dbc_database.get_message_by_frame_id(lookup_id)
+            print(f"[DECODE] Found message: {message.name}")
             decoded = message.decode(data)
             
             # Convert NamedSignalValue objects to regular Python types for JSON serialization
@@ -499,7 +508,11 @@ class CANBackend:
                 'message_name': message.name,
                 'signals': signals
             }
-        except:
+        except KeyError as e:
+            print(f"[DECODE] Message not found in DBC: can_id=0x{can_id:X}, is_extended={is_extended}, error={e}")
+            return None
+        except Exception as e:
+            print(f"[DECODE] Decode error: can_id=0x{can_id:X}, error={e}")
             return None
     
     def _on_message_received(self, msg):
@@ -520,11 +533,18 @@ class CANBackend:
             'dlc': msg.dlc
         }
         
+        # Debug: Print first few messages
+        if self.message_count <= 5:
+            print(f"[RX] Message #{self.message_count}: ID=0x{msg.id:X}, Extended={msg.is_extended}, DLC={msg.dlc}, Data={msg.data.hex()}")
+        
         # Try to decode if DBC available
         if self.dbc_database:
             decoded = self.decode_message(msg.id, msg.data, msg.is_extended)
             if decoded:
                 message_data['decoded'] = decoded
+        else:
+            if self.message_count <= 2:
+                print(f"[RX] No DBC database available for decoding")
         
         # Schedule broadcast on the event loop (if available)
         if self.loop and self.loop.is_running():
@@ -1055,6 +1075,11 @@ async def startup_event():
     print(f"DBC Support: {DBC_SUPPORT}")
     print("=" * 60)
     
+    # Set the event loop for the backend so messages can be broadcast
+    # even before the first WebSocket connection
+    backend.loop = asyncio.get_event_loop()
+    print("[OK] Event loop initialized for CAN message broadcasting")
+    
     # Auto-load last DBC file if it exists
     if DBC_SUPPORT and LAST_DBC_FILE.exists():
         try:
@@ -1065,13 +1090,13 @@ async def startup_event():
             if dbc_path.exists():
                 if backend.load_dbc_file(str(dbc_path)):
                     msg_count = len(backend.dbc_database.messages) if backend.dbc_database else 0
-                    print(f"✓ Auto-loaded DBC file: {last_filename} ({msg_count} messages)")
+                    print(f"[OK] Auto-loaded DBC file: {last_filename} ({msg_count} messages)")
                 else:
-                    print(f"✗ Failed to auto-load DBC file: {last_filename}")
+                    print(f"[ERROR] Failed to auto-load DBC file: {last_filename}")
             else:
-                print(f"ℹ Last DBC file not found: {last_filename}")
+                print(f"[INFO] Last DBC file not found: {last_filename}")
         except Exception as e:
-            print(f"✗ Error auto-loading DBC file: {e}")
+            print(f"[ERROR] Error auto-loading DBC file: {e}")
     
     print("=" * 60)
 
@@ -1091,11 +1116,18 @@ async def shutdown_event():
 
 def main():
     """Run the backend server"""
+    # Note: reload=False for stability when launched from start.py
+    # For development, run directly: python api.py --reload
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--reload', action='store_true', help='Enable auto-reload for development')
+    args = parser.parse_args()
+    
     uvicorn.run(
         "api:app",
         host="0.0.0.0",
         port=8000,
-        reload=True,
+        reload=args.reload,
         log_level="info"
     )
 

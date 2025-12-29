@@ -1,11 +1,41 @@
 /* CAN Explorer Layout */
 .can-explorer-layout {
   display: flex;
-  gap: 20px;
+  gap: 12px;
   height: 100vh;
   min-height: 0;
-  padding: 20px;
+  padding: 12px;
   box-sizing: border-box;
+  position: relative;
+}
+
+/* Sidebar Toggle Button */
+.sidebar-toggle {
+  position: fixed;
+  top: 22px;
+  left: 287px;
+  z-index: 1000;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 6px;
+  cursor: pointer;
+  color: #888;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar-toggle:hover {
+  background: #252525;
+  color: #f5f5f5;
+  border-color: #dc2626;
+}
+
+.can-sidebar.collapsed ~ .sidebar-toggle,
+.can-sidebar.collapsed + .sidebar-toggle {
+  left: 12px;
 }
 
 /* Sidebar Styles */
@@ -20,6 +50,15 @@
   border-right: 2px solid #1a1a1a;
   overflow-y: auto;
   max-height: 100%;
+  transition: width 0.3s ease, padding 0.3s ease, opacity 0.3s ease;
+}
+
+.can-sidebar.collapsed {
+  width: 0;
+  padding: 0;
+  overflow: hidden;
+  opacity: 0;
+  border: none;
 }
 
 .sidebar-section {
@@ -37,6 +76,19 @@
   font-size: 14px;
   margin-bottom: 12px;
   color: #f5f5f5;
+}
+
+.sidebar-header.collapsible {
+  cursor: pointer;
+  user-select: none;
+  padding: 8px;
+  margin: -8px -8px 8px -8px;
+  border-radius: 6px;
+  transition: background-color 0.15s ease;
+}
+
+.sidebar-header.collapsible:hover {
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .sidebar-status {
@@ -284,12 +336,12 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  background: #0a0a0a;
+  background: #000000;
   border: 1px solid #1a1a1a;
-  border-radius: 8px;
+  border-radius: 4px;
   overflow: hidden;
-  padding: 15px;
-  gap: 15px;
+  padding: 0;
+  gap: 0;
 }
 
 .messages-header {
@@ -319,6 +371,7 @@
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+  line-height: 1.2;
 }
 
 .messages-table thead {
@@ -329,44 +382,50 @@
 }
 
 .messages-table thead th {
-  padding: 12px 15px;
+  padding: 4px 6px;
   text-align: left;
   font-weight: 600;
   color: white;
   text-transform: uppercase;
   font-size: 11px;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
 }
 
 .messages-table tbody tr.message-row {
   border-bottom: 1px solid #1a1a1a;
-  transition: background-color 0.2s;
+  transition: background-color 0.1s;
   background: #000000;
 }
 
 .messages-table tbody tr.message-row:hover {
+  background: #0f0f0f;
+}
+
+.messages-table tbody tr.message-row.clickable {
+  cursor: pointer;
+}
+
+.messages-table tbody tr.message-row.clickable:hover {
   background: #141414;
 }
 
 .messages-table tbody td {
-  padding: 10px 15px;
+  padding: 2px 6px;
   color: #f5f5f5;
+  white-space: nowrap;
 }
 
-/* Expand Button */
-.expand-btn {
-  background: none;
-  border: none;
-  color: #888;
-  cursor: pointer;
-  padding: 0;
+/* Expand Icon */
+.expand-icon {
+  color: #666;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: color 0.2s;
+  transition: color 0.15s;
 }
 
-.expand-btn:hover {
+.message-row.clickable:hover .expand-icon {
   color: #ef4444;
 }
 
@@ -381,31 +440,31 @@
 }
 
 .signals-container {
-  padding: 10px 15px;
+  padding: 2px 6px 4px 6px;
 }
 
 /* Vertical Signals Table */
 .signals-table {
   width: 100%;
   border-collapse: collapse;
-  background: #141414;
-  border-radius: 6px;
+  background: #0a0a0a;
+  border-radius: 3px;
   overflow: hidden;
   table-layout: auto;
 }
 
 .signals-table thead {
-  background: rgba(220, 38, 38, 0.2);
+  background: rgba(220, 38, 38, 0.15);
 }
 
 .signals-table thead th {
-  padding: 8px 12px;
+  padding: 2px 6px;
   text-align: left;
   font-weight: 600;
-  color: #f5f5f5;
+  color: #ccc;
   font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.3px;
   border-bottom: 1px solid #2a2a2a;
 }
 
@@ -426,11 +485,11 @@
 }
 
 .signals-table tbody tr:hover {
-  background: #1a1a1a;
+  background: #141414;
 }
 
 .signals-table tbody td {
-  padding: 6px 12px;
+  padding: 1px 6px;
   color: #f5f5f5;
   vertical-align: middle;
 }
@@ -439,51 +498,51 @@
   color: #888;
   font-weight: 500;
   font-size: 12px;
-  padding-right: 8px;
+  padding-right: 4px;
 }
 
 .signals-table .signal-value {
   font-family: 'Consolas', 'Monaco', monospace;
   color: #ef4444;
   font-weight: 600;
-  font-size: 13px;
-  padding-left: 8px;
+  font-size: 12px;
+  padding-left: 4px;
 }
 
 /* Hex Data Styling - BRIGHTER for better contrast */
 .hex-data {
   font-family: 'Consolas', 'Monaco', monospace;
   color: #fef2f2;
-  font-weight: 700;
-  font-size: 14px;
-  background: rgba(220, 38, 38, 0.15);
-  padding: 4px 8px;
-  border-radius: 4px;
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  font-weight: 600;
+  font-size: 12px;
+  background: rgba(220, 38, 38, 0.12);
+  padding: 1px 4px;
+  border-radius: 2px;
+  border: 1px solid rgba(239, 68, 68, 0.25);
 }
 
 .hex-data-small {
   font-family: 'Consolas', 'Monaco', monospace;
-  color: #888;
+  color: #999;
   font-weight: 400;
-  font-size: 11px;
+  font-size: 12px;
+  letter-spacing: -0.3px;
 }
 
 /* Message Name */
 .message-name {
   color: #ef4444;
-  font-weight: 600;
-  font-size: 14px;
+  font-weight: 500;
+  font-size: 13px;
 }
 
 /* Badges */
 .badge {
-  padding: 4px 10px;
-  border-radius: 12px;
+  padding: 1px 4px;
+  border-radius: 3px;
   font-size: 11px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  font-family: 'Consolas', 'Monaco', monospace;
 }
 
 .badge-success {
@@ -570,12 +629,18 @@
   .can-explorer-layout {
     flex-direction: column;
     height: auto;
+    padding: 10px;
+    gap: 10px;
   }
 
   .can-sidebar {
     width: 100%;
     flex-direction: row;
     flex-wrap: wrap;
+    border-right: none;
+    border-bottom: 2px solid #1a1a1a;
+    padding: 10px;
+    gap: 10px;
   }
 
   .sidebar-section {
@@ -589,21 +654,165 @@
 }
 
 @media (max-width: 768px) {
-  .sidebar-section {
-    min-width: 100%;
+  .can-explorer-layout {
+    padding: 0;
+    gap: 0;
   }
 
-  .messages-table {
+  .can-sidebar {
+    flex-direction: column;
+    padding: 8px;
+    gap: 8px;
+  }
+
+  .sidebar-section {
+    min-width: 100%;
+    padding: 10px;
+  }
+
+  .sidebar-header {
+    font-size: 13px;
+    margin-bottom: 8px;
+  }
+
+  .app-header {
+    padding: 10px;
+  }
+
+  .app-title h1 {
+    font-size: 16px;
+  }
+
+  .app-subtitle {
+    font-size: 10px;
+  }
+
+  .sidebar-tabs {
+    gap: 4px;
+  }
+
+  .sidebar-tab {
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  .sidebar-tab.submenu {
+    padding: 6px 10px 6px 18px;
     font-size: 11px;
   }
 
-  .messages-table thead th,
-  .messages-table tbody td {
+  .sidebar-menu-header {
+    padding: 6px 10px;
+    font-size: 10px;
+  }
+
+  .connection-form {
+    gap: 8px;
+  }
+
+  .form-group label {
+    font-size: 11px;
+  }
+
+  .form-group input[type="text"],
+  .form-group select {
     padding: 8px 10px;
+    font-size: 14px; /* Prevent zoom on iOS */
+  }
+
+  .info-row {
+    font-size: 11px;
+  }
+
+  .can-main-content {
+    padding: 8px;
+    gap: 8px;
+    border-radius: 0;
+  }
+
+  .messages-header {
+    padding: 10px 12px;
+  }
+
+  .messages-header h3 {
+    font-size: 14px;
+  }
+
+  .messages-table {
+    font-size: 10px;
+  }
+
+  .messages-table thead th {
+    padding: 8px 6px;
+    font-size: 9px;
+  }
+
+  .messages-table tbody td {
+    padding: 6px;
   }
 
   .signals-grid {
     grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .signal-card {
+    padding: 6px 8px;
+  }
+
+  .collapsible-header {
+    padding: 10px 12px;
+  }
+
+  .collapsible-title {
+    font-size: 13px;
+    gap: 6px;
+  }
+
+  .collapsible-content {
+    padding: 8px;
+  }
+
+  /* Hide less important columns on mobile */
+  .messages-table th:nth-child(5),
+  .messages-table td:nth-child(5),
+  .messages-table th:nth-child(6),
+  .messages-table td:nth-child(6) {
+    display: none;
+  }
+}
+
+/* Extra small screens */
+@media (max-width: 480px) {
+  .can-sidebar {
+    padding: 6px;
+  }
+
+  .sidebar-section {
+    padding: 8px;
+  }
+
+  .app-title .app-logo {
+    max-width: 180px;
+  }
+
+  .messages-table {
+    font-size: 9px;
+  }
+
+  .messages-table thead th {
+    padding: 6px 4px;
+    font-size: 8px;
+  }
+
+  .messages-table tbody td {
+    padding: 5px 4px;
+  }
+
+  /* Hide even more columns on very small screens */
+  .messages-table th:nth-child(4),
+  .messages-table td:nth-child(4) {
+    display: none;
   }
 }
 
@@ -611,7 +820,7 @@
 .collapsible-section {
   background: #0a0a0a;
   border: 1px solid #2a2a2a;
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -632,30 +841,30 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 15px 20px;
-  background: #141414;
+  padding: 4px 8px;
+  background: #101010;
   border-bottom: 1px solid #2a2a2a;
   cursor: pointer;
   user-select: none;
-  transition: background 0.2s;
+  transition: background 0.1s;
   flex-shrink: 0;
 }
 
 .collapsible-header:hover {
-  background: #1a1a1a;
+  background: #181818;
 }
 
 .collapsible-title {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   font-weight: 600;
-  font-size: 16px;
-  color: white;
+  font-size: 12px;
+  color: #ccc;
 }
 
 .collapsible-content {
-  padding: 15px;
+  padding: 0;
   background: #0a0a0a;
   overflow-y: auto;
   flex: 1;

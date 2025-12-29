@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Send, Trash2, FileText, Filter, Upload, ChevronDown, ChevronRight, Activity, Wifi, WifiOff, RefreshCw, Plus, List } from 'lucide-react';
+import { Send, Trash2, FileText, Filter, Upload, ChevronDown, ChevronRight, ChevronLeft, Activity, Wifi, WifiOff, RefreshCw, Plus, List, PanelLeftClose, PanelLeft } from 'lucide-react';
 import TransmitList from './TransmitList';
 import './CANExplorer.css';
 
@@ -25,6 +25,10 @@ function CANExplorer({
   const [expandedRows, setExpandedRows] = useState(new Set());
   const [expandedReceivedMessages, setExpandedReceivedMessages] = useState(true);
   const [expandedTransmitList, setExpandedTransmitList] = useState(false);
+  const [connectionExpanded, setConnectionExpanded] = useState(true);
+  const [dbcExpanded, setDbcExpanded] = useState(true);
+  const [filterExpanded, setFilterExpanded] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const fileInputRef = useRef(null);
   
   // Connection form state
@@ -244,8 +248,17 @@ function CANExplorer({
 
   return (
     <div className="can-explorer-layout">
+      {/* Sidebar Toggle Button */}
+      <button 
+        className="sidebar-toggle"
+        onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+        title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+      >
+        {sidebarCollapsed ? <PanelLeft size={20} /> : <PanelLeftClose size={20} />}
+      </button>
+
       {/* Sidebar for ALL controls */}
-      <div className="can-sidebar">
+      <div className={`can-sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
         {/* App Header */}
         <div className="sidebar-section app-header">
           <div className="app-title">
@@ -292,12 +305,13 @@ function CANExplorer({
 
         {/* Connection Panel */}
         <div className="sidebar-section">
-          <div className="sidebar-header">
+          <div className="sidebar-header collapsible" onClick={() => setConnectionExpanded(!connectionExpanded)}>
+            {connectionExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
             {connected ? <Wifi size={18} /> : <WifiOff size={18} />}
             <span>Connection</span>
           </div>
           
-          <div className="connection-form">
+          {connectionExpanded && <div className="connection-form">
             <div className="form-group">
               <label>Device Type</label>
               <select 
@@ -419,16 +433,17 @@ function CANExplorer({
                 </div>
               </div>
             )}
-          </div>
+          </div>}
         </div>
 
         {/* DBC Upload */}
         <div className="sidebar-section">
-          <div className="sidebar-header">
+          <div className="sidebar-header collapsible" onClick={() => setDbcExpanded(!dbcExpanded)}>
+            {dbcExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
             <FileText size={18} />
             <span>DBC File</span>
           </div>
-          <button className="btn btn-secondary btn-block" onClick={handleUploadClick}>
+          {dbcExpanded && <><button className="btn btn-secondary btn-block" onClick={handleUploadClick}>
             <Upload size={16} />
             Upload
           </button>
@@ -447,22 +462,23 @@ function CANExplorer({
             <div className="sidebar-status">
               No file loaded
             </div>
-          )}
+          )}</>}
         </div>
 
         {/* Filter */}
         <div className="sidebar-section">
-          <div className="sidebar-header">
+          <div className="sidebar-header collapsible" onClick={() => setFilterExpanded(!filterExpanded)}>
+            {filterExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
             <Filter size={18} />
             <span>Filter</span>
           </div>
-          <input
+          {filterExpanded && <input
             type="text"
             placeholder="ID or data..."
             value={filterText}
             onChange={(e) => setFilterText(e.target.value)}
             className="filter-input-sidebar"
-          />
+          />}
         </div>
       </div>
 
@@ -501,13 +517,13 @@ function CANExplorer({
               <table className="messages-table">
                 <thead>
                   <tr>
-                    <th style={{ width: '40px' }}></th>
-                    <th style={{ width: '100px' }}>CAN ID</th>
-                    <th>Message Name</th>
-                    <th style={{ width: '150px' }}>Data (Hex)</th>
-                    <th style={{ width: '80px' }}>Count</th>
-                    <th style={{ width: '100px' }}>Cycle Time</th>
-                    <th style={{ width: '100px' }}>Last RX</th>
+                    <th style={{ width: '20px' }}></th>
+                    <th style={{ width: '75px' }}>ID</th>
+                    <th>Name</th>
+                    <th style={{ width: '140px' }}>Data</th>
+                    <th style={{ width: '50px' }}>Cnt</th>
+                    <th style={{ width: '70px' }}>Cycle</th>
+                    <th style={{ width: '70px' }}>Time</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -525,15 +541,15 @@ function CANExplorer({
                       
                       return (
                         <React.Fragment key={rowKey}>
-                          <tr className="message-row">
+                          <tr 
+                            className={`message-row ${hasSignals ? 'clickable' : ''}`}
+                            onClick={() => hasSignals && toggleRowExpansion(rowKey)}
+                          >
                             <td>
                               {hasSignals && (
-                                <button
-                                  className="expand-btn"
-                                  onClick={() => toggleRowExpansion(rowKey)}
-                                >
-                                  {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                                </button>
+                                <span className="expand-icon">
+                                  {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                </span>
                               )}
                             </td>
                             <td>

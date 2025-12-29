@@ -53,22 +53,43 @@
 
 @media (max-width: 768px) {
   .status-bar {
-    padding: 10px 16px;
+    padding: 8px 12px;
   }
 
   .status-content {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
   }
 
   .status-section {
-    flex-direction: column;
-    align-items: flex-start;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
     gap: 8px;
   }
 
   .status-item {
-    font-size: 12px;
+    font-size: 10px;
+    gap: 4px;
+  }
+
+  .status-label {
+    display: none; /* Hide labels on mobile, just show values */
+  }
+
+  .status-value {
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .status-bar {
+    padding: 6px 8px;
+  }
+
+  .status-item {
+    font-size: 9px;
   }
 }

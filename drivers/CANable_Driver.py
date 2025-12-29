@@ -24,6 +24,30 @@ import sys
 import asyncio
 import inspect
 
+# CRITICAL: Setup libusb backend BEFORE importing python-can
+# This is required on Windows for gs_usb to find devices
+if sys.platform == 'win32':
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_dir = os.path.dirname(script_dir)
+    libusb_path = os.path.join(project_dir, 'libusb-1.0.dll')
+    
+    if os.path.exists(libusb_path):
+        # Add to PATH first
+        os.environ['PATH'] = project_dir + os.pathsep + os.environ.get('PATH', '')
+        
+        # Force pyusb to use our libusb DLL
+        try:
+            import usb.backend.libusb1
+            import usb.core
+            _libusb_backend = usb.backend.libusb1.get_backend(
+                find_library=lambda x: libusb_path
+            )
+            # Force this backend to be used globally
+            usb.core._BACKENDS = [_libusb_backend]
+            print(f"[OK] Forced libusb backend: {libusb_path}")
+        except Exception as e:
+            print(f"[WARN] Could not force libusb backend: {e}")
+
 
 try:
     from can import Bus, Message
@@ -138,10 +162,25 @@ class CANableDriver:
             if os.path.exists(libusb_path):
                 # Add to PATH
                 os.environ['PATH'] = project_dir + os.pathsep + os.environ.get('PATH', '')
-                print(f"✓ Found libusb-1.0.dll at {libusb_path}")
+                print(f"[OK] Found libusb-1.0.dll at {libusb_path}")
+                
+                # Setup explicit libusb backend for Windows to work around gs_usb issues
+                try:
+                    import usb.core
+                    import usb.backend.libusb1
+                    self._libusb_backend = usb.backend.libusb1.get_backend(
+                        find_library=lambda x: libusb_path
+                    )
+                    print(f"[OK] Configured explicit libusb backend")
+                except Exception as e:
+                    print(f"[WARN] Could not setup explicit backend: {e}")
+                    self._libusb_backend = None
             else:
-                print(f"⚠ Warning: libusb-1.0.dll not found at {libusb_path}")
+                print(f"[WARN] Warning: libusb-1.0.dll not found at {libusb_path}")
                 print("  The driver may fail to connect without libusb-1.0.dll")
+                self._libusb_backend = None
+        else:
+            self._libusb_backend = None
         
     def get_available_devices(self) -> List[dict]:
         """
@@ -154,15 +193,18 @@ class CANableDriver:
         available_devices = []
         
         if usb is None:
-            print("⚠ pyusb not available, cannot enumerate USB devices")
+            print("[WARN] pyusb not available, cannot enumerate USB devices")
             print("  Install with: pip install pyusb")
             return available_devices
         
         try:
+            # Use explicit backend if available (Windows fix)
+            backend = getattr(self, '_libusb_backend', None)
+            
             # Find all gs_usb compatible devices
             device_index = 0
             for vid, pid in GS_USB_DEVICES:
-                devices = usb.core.find(find_all=True, idVendor=vid, idProduct=pid)
+                devices = usb.core.find(find_all=True, backend=backend, idVendor=vid, idProduct=pid)
                 
                 for dev in devices:
                     try:
@@ -185,7 +227,8 @@ class CANableDriver:
                         'bus': dev.bus,
                         'address': dev.address,
                         'description': f"{manufacturer} {product}",
-                        'channel': f"can{device_index}"  # gs_usb uses can0, can1, etc.
+                        'channel': f"can{device_index}",  # gs_usb uses can0, can1, etc.
+                        '_usb_device': dev  # Store reference for direct connection
                     }
                     
                     available_devices.append(device_info)
@@ -245,49 +288,21 @@ class CANableDriver:
             # Get bitrate value
             bitrate = baudrate.value
             
-            # Try to connect with retry logic for "Access denied" errors
-            # This handles cases where USB device is still being released by OS
-            max_retries = 3
-            retry_delay = 1.5
-            last_error = None
-            
-            for attempt in range(max_retries):
-                try:
-                    # Create bus instance using gs_usb interface (Candle API)
-                    # This provides direct USB access to CANable with candleLight firmware
-                    self._bus = Bus(
-                        interface='gs_usb',
-                        channel=channel,  # Device index (0, 1, 2, ...)
-                        bitrate=bitrate,
-                        fd=fd_mode,
-                        data_bitrate=bitrate if fd_mode else None
-                    )
-                    # If we get here, connection succeeded
-                    break
-                    
-                except Exception as e:
-                    last_error = e
-                    error_str = str(e).lower()
-                    
-                    # Check if it's an "access denied" or "device busy" error
-                    if ('errno 13' in error_str or 
-                        'access denied' in error_str or 
-                        'insufficient permissions' in error_str or
-                        'device busy' in error_str or
-                        'resource busy' in error_str):
-                        
-                        if attempt < max_retries - 1:
-                            print(f"⚠ Device busy, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})")
-                            time.sleep(retry_delay)
-                            # Try force cleanup again before retry
-                            import gc
-                            gc.collect()
-                        else:
-                            # Last attempt failed
-                            raise
-                    else:
-                        # Different error, don't retry
-                        raise
+            # Try to connect - no retries to avoid locking issues
+            try:
+                # Create bus instance using gs_usb interface (Candle API)
+                # This provides direct USB access to CANable with candleLight firmware
+                # IMPORTANT: Must use 'index' parameter for device selection!
+                self._bus = Bus(
+                    interface='gs_usb',
+                    channel=channel,  # Still needed for python-can
+                    index=channel,    # THIS IS CRITICAL - index parameter for device selection
+                    bitrate=bitrate,
+                    fd=fd_mode,
+                    data_bitrate=bitrate if fd_mode else None
+                )
+            except Exception as e:
+                raise
             
             self._channel = channel
             self._baudrate = baudrate
@@ -301,18 +316,18 @@ class CANableDriver:
             else:
                 device_desc = f"Device {channel}"
             
-            print(f"✓ Connected to {device_desc} (channel {channel}) at {bitrate} bps")
+            print(f"[OK] Connected to {device_desc} (channel {channel}) at {bitrate} bps")
             print(f"  Using Candle API (gs_usb) via libusb")
             return True
             
         except Exception as e:
-            print(f"✗ Failed to connect: {str(e)}")
+            print(f"[ERROR] Failed to connect: {str(e)}")
             print(f"\n  Troubleshooting:")
             print(f"  1. Verify CANable is connected and has candleLight firmware")
             print(f"  2. Check available devices with get_available_devices()")
-            print(f"  3. On Windows: Ensure libusb-1.0.dll is in project directory")
-            print(f"  4. On Linux: Check permissions (sudo usermod -a -G plugdev $USER)")
-            print(f"  5. Try installing: pip install python-can[gs_usb]")
+            print(f"  3. On Windows: Ensure WinUSB driver is installed (use Zadig)")
+            print(f"  4. Try unplugging and replugging the CANable")
+            print(f"  5. On Linux: Check permissions (sudo usermod -a -G plugdev $USER)")
             return False
     
     def disconnect(self) -> bool:
@@ -374,11 +389,11 @@ class CANableDriver:
                     except:
                         pass  # Ignore shutdown errors
                     
-                    print("✓ Bus shutdown complete")
+                    print("[OK] Bus shutdown complete")
                     
                 except Exception as e:
                     # Ignore all shutdown errors - we're cleaning up anyway
-                    print(f"⚠ Note: {str(e)}")
+                    print(f"[NOTE] {str(e)}")
                 finally:
                     self._bus = None
                     
@@ -395,11 +410,11 @@ class CANableDriver:
             self._baudrate = None
             self._device_info = None
             
-            print("✓ Disconnected from CANable device")
+            print("[OK] Disconnected from CANable device")
             return True
             
         except Exception as e:
-            print(f"✗ Failed to disconnect: {str(e)}")
+            print(f"[ERROR] Failed to disconnect: {str(e)}")
             # Even if there's an error, try to clean up
             self._is_connected = False
             self._bus = None
@@ -430,7 +445,7 @@ class CANableDriver:
             True if message sent successfully, False otherwise.
         """
         if not self._is_connected or self._bus is None:
-            print("✗ Not connected to CANable device")
+            print("[ERROR] Not connected to CANable device")
             return False
         
         try:
@@ -447,7 +462,7 @@ class CANableDriver:
         except Exception as e:
             # Only print error if we're still supposed to be connected
             if self._is_connected:
-                print(f"✗ Failed to send message: {str(e)}")
+                print(f"[ERROR] Failed to send message: {str(e)}")
             return False
     
     def read_message(self, timeout: float = 1.0) -> Optional[CANMessage]:
@@ -483,7 +498,7 @@ class CANableDriver:
         except Exception as e:
             # Only print error if we're still supposed to be connected
             if self._is_connected:
-                print(f"✗ Failed to read message: {str(e)}")
+                print(f"[ERROR] Failed to read message: {str(e)}")
             return None
     
     def start_receive_thread(self, callback: Callable[[CANMessage], None]) -> bool:
@@ -498,11 +513,11 @@ class CANableDriver:
             True if thread started successfully, False otherwise.
         """
         if not self._is_connected:
-            print("✗ Not connected to CANable device")
+            print("[ERROR] Not connected to CANable device")
             return False
         
         if self._receive_thread and self._receive_thread.is_alive():
-            print("✗ Receive thread already running")
+            print("[ERROR] Receive thread already running")
             return False
         
         self._receive_callback = callback
@@ -513,7 +528,7 @@ class CANableDriver:
         )
         self._receive_thread.start()
         
-        print("✓ Receive thread started")
+        print("[OK] Receive thread started")
         return True
     
     def stop_receive_thread(self) -> bool:
@@ -533,20 +548,26 @@ class CANableDriver:
         
         # Check if thread actually stopped
         if self._receive_thread.is_alive():
-            print("⚠ Warning: Receive thread did not stop cleanly")
+            print("[WARN] Warning: Receive thread did not stop cleanly")
         
         self._receive_thread = None
         self._receive_callback = None
         
-        print("✓ Receive thread stopped")
+        print("[OK] Receive thread stopped")
         return True
     
     def _receive_loop(self):
         """Internal method for receiving messages in a loop."""
+        error_count = 0
+        max_errors = 10  # Allow some errors before giving up
+        
         while not self._stop_receive and self._is_connected:
             try:
                 msg = self.read_message(timeout=0.1)
                 if msg and self._receive_callback:
+                    # Reset error count on successful message
+                    error_count = 0
+                    
                     # Check if callback is async
                     if inspect.iscoroutinefunction(self._receive_callback):
                         # Run async callback in the event loop
@@ -565,13 +586,25 @@ class CANableDriver:
                             asyncio.run(self._receive_callback(msg))
                     else:
                         # Synchronous callback
-                        self._receive_callback(msg)
+                        try:
+                            self._receive_callback(msg)
+                        except Exception as cb_error:
+                            # Don't let callback errors kill the receive loop
+                            error_count += 1
+                            if error_count <= 3:
+                                print(f"[WARN] Callback error: {str(cb_error)}")
             except Exception as e:
-                # Ignore errors when stopping or disconnecting
+                # Count errors but don't immediately exit
+                error_count += 1
                 if not self._stop_receive and self._is_connected:
-                    print(f"Error in receive loop: {str(e)}")
-                # Exit loop on errors
-                break
+                    if error_count <= 3:
+                        print(f"[WARN] Receive loop error ({error_count}): {str(e)}")
+                    if error_count >= max_errors:
+                        print(f"[ERROR] Too many receive errors, stopping")
+                        break
+                else:
+                    # We're stopping anyway, exit cleanly
+                    break
     
     def get_bus_status(self) -> dict:
         """
@@ -606,7 +639,7 @@ class CANableDriver:
             True if queue cleared successfully, False otherwise.
         """
         if not self._is_connected:
-            print("✗ Not connected to CANable device")
+            print("[ERROR] Not connected to CANable device")
             return False
         
         try:
@@ -615,11 +648,11 @@ class CANableDriver:
             while self.read_message(timeout=0.01):
                 count += 1
             
-            print(f"✓ Cleared {count} messages from queue")
+            print(f"[OK] Cleared {count} messages from queue")
             return True
             
         except Exception as e:
-            print(f"✗ Failed to clear queue: {str(e)}")
+            print(f"[ERROR] Failed to clear queue: {str(e)}")
             return False
     
     @property
@@ -665,7 +698,7 @@ if __name__ == "__main__":
     devices = driver.get_available_devices()
     
     if not devices:
-        print("✗ No CANable/gs_usb devices found!")
+        print("[ERROR] No CANable/gs_usb devices found!")
         print("\n  Troubleshooting:")
         print("  1. Make sure your CANable device is connected via USB")
         print("  2. Verify it has candleLight firmware (gs_usb compatible)")
@@ -676,7 +709,7 @@ if __name__ == "__main__":
         print("  5. Install pyusb: pip install pyusb")
         exit(1)
     
-    print(f"✓ Found {len(devices)} CANable/gs_usb device(s):")
+    print(f"[OK] Found {len(devices)} CANable/gs_usb device(s):")
     for dev in devices:
         print(f"  [{dev['index']}] {dev['description']}")
         print(f"      VID: 0x{dev['vid']:04X}, PID: 0x{dev['pid']:04X}")
@@ -688,7 +721,7 @@ if __name__ == "__main__":
     channel_index = 0  # Use first device
     
     if driver.connect(channel_index, CANableBaudRate.BAUD_500K):
-        print(f"✓ Successfully connected!")
+        print(f"[OK] Successfully connected!")
         
         # Get bus status
         print("\n3. Checking bus status...")
@@ -703,7 +736,7 @@ if __name__ == "__main__":
         print("\n4. Sending test message...")
         test_data = bytes([0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88])
         if driver.send_message(0x123, test_data):
-            print(f"✓ Message sent: ID=0x123, Data={test_data.hex()}")
+            print(f"[OK] Message sent: ID=0x123, Data={test_data.hex()}")
         
         # Example: Read messages
         print("\n5. Listening for messages (5 seconds)...")
@@ -720,7 +753,7 @@ if __name__ == "__main__":
         print("\n6. Disconnecting...")
         driver.disconnect()
     else:
-        print("✗ Failed to connect!")
+        print("[ERROR] Failed to connect!")
         print("\nTroubleshooting:")
         print("  - Check that the CANable is properly connected via USB")
         print("  - Verify the device has candleLight firmware (gs_usb compatible)")

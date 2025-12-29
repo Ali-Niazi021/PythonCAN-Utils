@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Send, Plus, Trash2, Edit2 } from 'lucide-react';
+import { Send, Plus, Trash2, ChevronRight, ChevronDown } from 'lucide-react';
 import { apiService } from '../services/api';
 import './TransmitList.css';
 
 function TransmitList({ dbcFile, onSendMessage }) {
   const [transmitItems, setTransmitItems] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [dbcMessages, setDbcMessages] = useState([]);
   const [editingItem, setEditingItem] = useState(null);
@@ -101,61 +102,116 @@ function TransmitList({ dbcFile, onSendMessage }) {
     }
   };
 
+  // Toggle row expansion
+  const toggleExpand = (id) => {
+    setExpandedId(expandedId === id ? null : id);
+  };
+
   return (
     <div className="transmit-list">
       <div className="transmit-list-header">
         <h4>Transmit List</h4>
         <button className="btn btn-sm btn-primary" onClick={() => setShowAddDialog(true)}>
-          <Plus size={16} />
-          Add Message
+          <Plus size={12} />
+          Add
         </button>
       </div>
 
       {transmitItems.length === 0 ? (
         <div className="transmit-list-empty">
-          No transmit messages defined. Click "Add Message" to get started.
+          No transmit messages. Click "Add" to create one.
         </div>
       ) : (
-        <div className="transmit-list-items">
-          {transmitItems.map(item => (
-            <div
-              key={item.id}
-              className={`transmit-item ${selectedId === item.id ? 'selected' : ''}`}
-              onClick={() => setSelectedId(item.id)}
-            >
-              <div className="transmit-item-info">
-                <div className="transmit-item-name">
-                  {item.message_name || `Custom 0x${item.can_id.toString(16).toUpperCase()}`}
-                </div>
-                <div className="transmit-item-id">
-                  ID: 0x{item.can_id.toString(16).toUpperCase().padStart(3, '0')}
-                  {item.is_extended && ' (Ext)'}
-                </div>
-                <div className="transmit-item-data">
-                  Data: {item.data.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}
-                </div>
-                {item.description && (
-                  <div className="transmit-item-desc">{item.description}</div>
-                )}
-              </div>
-              <div className="transmit-item-actions">
-                <button
-                  className="btn btn-icon btn-sm btn-success"
-                  onClick={(e) => { e.stopPropagation(); handleSendItem(item); }}
-                  title="Send (or press Space when selected)"
-                >
-                  <Send size={16} />
-                </button>
-                <button
-                  className="btn btn-icon btn-sm btn-danger"
-                  onClick={(e) => { e.stopPropagation(); handleRemoveItem(item.id); }}
-                  title="Remove"
-                >
-                  <Trash2 size={16} />
-                </button>
-              </div>
-            </div>
-          ))}
+        <div className="transmit-table-container">
+          <table className="transmit-table">
+            <thead>
+              <tr>
+                <th style={{width: '20px'}}></th>
+                <th style={{width: '70px'}}>ID</th>
+                <th>Name</th>
+                <th style={{width: '180px'}}>Data</th>
+                <th style={{width: '70px'}}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {transmitItems.map(item => {
+                const hasSignals = item.signals && Object.keys(item.signals).length > 0;
+                const isExpanded = expandedId === item.id;
+                
+                return (
+                  <React.Fragment key={item.id}>
+                    <tr 
+                      className={`transmit-row ${selectedId === item.id ? 'selected' : ''} ${hasSignals ? 'clickable' : ''}`}
+                      onClick={() => {
+                        setSelectedId(item.id);
+                        if (hasSignals) toggleExpand(item.id);
+                      }}
+                    >
+                      <td className="expand-cell">
+                        {hasSignals && (
+                          <span className="expand-icon">
+                            {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                          </span>
+                        )}
+                      </td>
+                      <td className="id-cell">
+                        <span className="hex-id">0x{item.can_id.toString(16).toUpperCase().padStart(3, '0')}</span>
+                        {item.is_extended && <span className="ext-badge">EXT</span>}
+                      </td>
+                      <td className="name-cell">
+                        <span className="msg-name">{item.message_name || 'Custom'}</span>
+                      </td>
+                      <td className="data-cell">
+                        <span className="hex-data">
+                          {item.data.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}
+                        </span>
+                      </td>
+                      <td className="actions-cell">
+                        <button
+                          className="btn btn-icon btn-xs btn-success"
+                          onClick={(e) => { e.stopPropagation(); handleSendItem(item); }}
+                          title="Send"
+                        >
+                          <Send size={12} />
+                        </button>
+                        <button
+                          className="btn btn-icon btn-xs btn-danger"
+                          onClick={(e) => { e.stopPropagation(); handleRemoveItem(item.id); }}
+                          title="Remove"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </td>
+                    </tr>
+                    {isExpanded && hasSignals && (
+                      <tr className="signals-row">
+                        <td colSpan="5">
+                          <div className="signals-dropdown">
+                            <table className="signals-table">
+                              <thead>
+                                <tr>
+                                  <th>Signal</th>
+                                  <th>Value</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {Object.entries(item.signals).map(([name, value]) => (
+                                  <tr key={name}>
+                                    <td className="signal-name">{name}</td>
+                                    <td className="signal-value">{value}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -168,7 +224,7 @@ function TransmitList({ dbcFile, onSendMessage }) {
       )}
 
       <div className="transmit-list-hint">
-        💡 Tip: Select a message and press Spacebar to send it
+        Space = send selected
       </div>
     </div>
   );

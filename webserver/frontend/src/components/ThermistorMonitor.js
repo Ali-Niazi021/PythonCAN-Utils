@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Thermometer, TrendingUp, TrendingDown } from 'lucide-react';
+import { Thermometer, TrendingUp, TrendingDown, Wind } from 'lucide-react';
 import './ThermistorMonitor.css';
 
 function ThermistorMonitor({ messages }) {
@@ -33,45 +33,109 @@ function ThermistorMonitor({ messages }) {
     return modules;
   }, [messages]);
 
-  // Calculate statistics
+  // Organize data into cell groups (18 groups of 3 cells each) and ambient temps
+  const organizedData = useMemo(() => {
+    return thermistorData.map(module => {
+      // First 54 temps (0-53) are cell temps, grouped into 18 groups of 3
+      const cellGroups = [];
+      for (let i = 0; i < 18; i++) {
+        cellGroups.push({
+          groupNum: i + 1, // 1-indexed for display
+          cells: [
+            { index: i * 3, temp: module[i * 3] },
+            { index: i * 3 + 1, temp: module[i * 3 + 1] },
+            { index: i * 3 + 2, temp: module[i * 3 + 2] }
+          ]
+        });
+      }
+      
+      // Last 2 temps (54-55) are ambient air temps
+      const ambientTemps = [
+        { index: 54, temp: module[54] },
+        { index: 55, temp: module[55] }
+      ];
+      
+      return { cellGroups, ambientTemps };
+    });
+  }, [thermistorData]);
+
+  // Calculate statistics (cell temps only, excluding ambient sensors 54-55)
   const stats = useMemo(() => {
-    const allTemps = thermistorData.flat().filter(t => t !== null);
+    // Only use first 54 temps per module (indices 0-53), exclude ambient (54-55)
+    const cellTemps = thermistorData.flatMap(module => module.slice(0, 54)).filter(t => t !== null);
     
-    if (allTemps.length === 0) {
+    if (cellTemps.length === 0) {
       return { active: 0, min: null, max: null, avg: null };
     }
     
     return {
-      active: allTemps.length,
-      min: Math.min(...allTemps),
-      max: Math.max(...allTemps),
-      avg: allTemps.reduce((a, b) => a + b, 0) / allTemps.length
+      active: cellTemps.length,
+      min: Math.min(...cellTemps),
+      max: Math.max(...cellTemps),
+      avg: cellTemps.reduce((a, b) => a + b, 0) / cellTemps.length
     };
   }, [thermistorData]);
 
+  // Dynamic gradient from purple (cold) through green (ideal) to red (hot)
+  // Range: 15°C (purple) -> 30°C (blue) -> 37.5°C (green/ideal) -> 45°C (yellow) -> 60°C+ (red)
   const getTempColor = (temp) => {
     if (temp === null) return '#2d3748';
-    if (temp < 30) return '#8b5cf6';  // Purple
-    if (temp < 40) return '#3b82f6';  // Blue
-    if (temp < 50) return '#22c55e';  // Green
-    if (temp < 60) return '#f59e0b';  // Orange
-    return '#ef4444';  // Red
+    
+    // Clamp temperature to gradient range
+    const minTemp = 15;
+    const maxTemp = 60;
+    const clampedTemp = Math.max(minTemp, Math.min(maxTemp, temp));
+    
+    // Normalize to 0-1 range
+    const t = (clampedTemp - minTemp) / (maxTemp - minTemp);
+    
+    // Color stops: purple (0) -> blue (0.33) -> green (0.5) -> yellow (0.67) -> red (1)
+    // These correspond to: 15°C -> 30°C -> 37.5°C -> 45°C -> 60°C
+    const colors = [
+      { pos: 0,    r: 139, g: 92,  b: 246 }, // Purple (#8b5cf6) - cold ambient
+      { pos: 0.33, r: 59,  g: 130, b: 246 }, // Blue (#3b82f6) - normal ambient
+      { pos: 0.5,  r: 34,  g: 197, b: 94  }, // Green (#22c55e) - ideal operating
+      { pos: 0.67, r: 250, g: 204, b: 21  }, // Yellow (#facc15) - warm
+      { pos: 1,    r: 239, g: 68,  b: 68  }  // Red (#ef4444) - hot
+    ];
+    
+    // Find the two colors to interpolate between
+    let lower = colors[0];
+    let upper = colors[colors.length - 1];
+    
+    for (let i = 0; i < colors.length - 1; i++) {
+      if (t >= colors[i].pos && t <= colors[i + 1].pos) {
+        lower = colors[i];
+        upper = colors[i + 1];
+        break;
+      }
+    }
+    
+    // Interpolate between the two colors
+    const range = upper.pos - lower.pos;
+    const localT = range > 0 ? (t - lower.pos) / range : 0;
+    
+    const r = Math.round(lower.r + (upper.r - lower.r) * localT);
+    const g = Math.round(lower.g + (upper.g - lower.g) * localT);
+    const b = Math.round(lower.b + (upper.b - lower.b) * localT);
+    
+    return `rgb(${r}, ${g}, ${b})`;
+  };
+
+  // Calculate average temp for a cell group
+  const getGroupAvgTemp = (cells) => {
+    const validTemps = cells.map(c => c.temp).filter(t => t !== null);
+    if (validTemps.length === 0) return null;
+    return validTemps.reduce((a, b) => a + b, 0) / validTemps.length;
   };
 
   return (
     <div className="thermistor-monitor">
       <div className="card">
-        <div className="card-header">
-          <div className="card-title">
-            <Thermometer size={20} />
-            336-Channel Multi-Module Thermistor Monitor
-          </div>
-        </div>
-        
         <div className="stats-bar">
           <div className="stat-item">
             <span className="stat-label">Active:</span>
-            <span className="stat-value">{stats.active}/336</span>
+            <span className="stat-value">{stats.active}/324</span>
           </div>
           {stats.min !== null && (
             <>
@@ -95,52 +159,59 @@ function ThermistorMonitor({ messages }) {
 
         <div className="thermistor-grid-container">
           <div className="thermistor-grid">
-            {thermistorData.map((module, moduleId) => (
+            {organizedData.map((moduleData, moduleId) => (
               <div key={moduleId} className="module-column">
                 <div className="module-header">Module {moduleId}</div>
-                <div className="channel-list">
-                  {module.map((temp, channel) => (
-                    <div
-                      key={channel}
-                      className="thermistor-cell"
-                      style={{ backgroundColor: getTempColor(temp) }}
-                      title={`Module ${moduleId}, Channel ${channel}: ${temp !== null ? temp.toFixed(1) + '°C' : 'No data'}`}
-                    >
-                      <div className="channel-num">{channel}</div>
-                      {temp !== null && (
-                        <div className="temp-value">{temp.toFixed(1)}</div>
-                      )}
-                    </div>
-                  ))}
+                
+                {/* Cell Groups Section */}
+                <div className="cell-groups-list">
+                  {moduleData.cellGroups.map((group) => {
+                    const avgTemp = getGroupAvgTemp(group.cells);
+                    return (
+                      <div 
+                        key={group.groupNum} 
+                        className="cell-group"
+                        style={{ borderLeftColor: getTempColor(avgTemp) }}
+                      >
+                        <span className="group-label">C{group.groupNum}</span>
+                        <div className="cell-group-temps">
+                          {group.cells.map((cell) => (
+                            <span
+                              key={cell.index}
+                              className="temp-chip"
+                              style={{ backgroundColor: getTempColor(cell.temp) }}
+                              title={`Module ${moduleId}, Thermistor ${cell.index}: ${cell.temp !== null ? cell.temp.toFixed(1) + '°C' : 'No data'}`}
+                            >
+                              {cell.temp !== null ? cell.temp.toFixed(1) : '--'}
+                            </span>
+                          ))}
+                        </div>
+                        <span className="group-avg" style={{ color: getTempColor(avgTemp) }}>
+                          {avgTemp !== null ? avgTemp.toFixed(1) : '--'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                
+                {/* Ambient Temps Section */}
+                <div className="ambient-row">
+                  <span className="ambient-label"><Wind size={10} /> Amb</span>
+                  <div className="ambient-temps">
+                    {moduleData.ambientTemps.map((ambient, idx) => (
+                      <span
+                        key={ambient.index}
+                        className="temp-chip ambient-chip"
+                        style={{ backgroundColor: getTempColor(ambient.temp) }}
+                        title={`Module ${moduleId}, Ambient ${idx + 1}: ${ambient.temp !== null ? ambient.temp.toFixed(1) + '°C' : 'No data'}`}
+                      >
+                        {ambient.temp !== null ? ambient.temp.toFixed(1) : '--'}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
             ))}
-          </div>
-        </div>
-
-        <div className="legend">
-          <div className="legend-title">Temperature Scale:</div>
-          <div className="legend-items">
-            <div className="legend-item">
-              <div className="legend-color" style={{ backgroundColor: '#8b5cf6' }}></div>
-              <span>&lt; 30°C</span>
-            </div>
-            <div className="legend-item">
-              <div className="legend-color" style={{ backgroundColor: '#3b82f6' }}></div>
-              <span>30-40°C</span>
-            </div>
-            <div className="legend-item">
-              <div className="legend-color" style={{ backgroundColor: '#22c55e' }}></div>
-              <span>40-50°C</span>
-            </div>
-            <div className="legend-item">
-              <div className="legend-color" style={{ backgroundColor: '#f59e0b' }}></div>
-              <span>50-60°C</span>
-            </div>
-            <div className="legend-item">
-              <div className="legend-color" style={{ backgroundColor: '#ef4444' }}></div>
-              <span>&gt; 60°C</span>
-            </div>
           </div>
         </div>
       </div>
