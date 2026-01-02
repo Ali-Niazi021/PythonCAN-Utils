@@ -53,6 +53,13 @@ except ImportError:
     CANABLE_AVAILABLE = False
     print("Warning: CANable_Driver not available")
 
+try:
+    from drivers.NetworkCAN_Driver import NetworkCANDriver, NetworkCANBaudRate, CANMessage as NetworkCANMessage
+    NETWORK_CAN_AVAILABLE = True
+except ImportError:
+    NETWORK_CAN_AVAILABLE = False
+    print("Warning: NetworkCAN_Driver not available")
+
 # Import firmware flasher
 try:
     from drivers.Firmware_Flasher import FirmwareFlasher
@@ -78,6 +85,7 @@ class DeviceType(str, Enum):
     """Supported CAN device types"""
     PCAN = "pcan"
     CANABLE = "canable"
+    NETWORK = "network"
 
 
 class ConnectionRequest(BaseModel):
@@ -222,7 +230,7 @@ class CANBackend:
     """Backend state management for CAN communication"""
     
     def __init__(self):
-        self.driver: Optional[Union[PCANDriver, CANableDriver]] = None
+        self.driver: Optional[Union[PCANDriver, CANableDriver, 'NetworkCANDriver']] = None
         self.device_type: Optional[DeviceType] = None
         self.is_connected: bool = False
         self.dbc_database: Optional['cantools.database.Database'] = None
@@ -276,6 +284,16 @@ class CANBackend:
             except Exception as e:
                 print(f"Error scanning CANable devices: {e}")
         
+        # Network CAN devices (always show as option if driver available)
+        if NETWORK_CAN_AVAILABLE:
+            devices.append(DeviceInfo(
+                device_type="network",
+                index=0,
+                name="Network CAN Server",
+                description="Connect to remote CAN server via IP:Port",
+                available=True
+            ))
+        
         return devices
     
     def connect(self, device_type: DeviceType, channel: Union[str, int], baudrate: str) -> bool:
@@ -317,6 +335,30 @@ class CANBackend:
                     channel_index = int(channel)
                 
                 if not self.driver.connect(channel_index, canable_baudrate):
+                    return False
+            
+            elif device_type == DeviceType.NETWORK:
+                if not NETWORK_CAN_AVAILABLE:
+                    raise Exception("Network CAN driver not available")
+                
+                # Parse channel as host:port (e.g., "192.168.1.100:8080")
+                if isinstance(channel, str) and ':' in channel:
+                    host, port_str = channel.rsplit(':', 1)
+                    port = int(port_str)
+                else:
+                    raise Exception("Network channel must be in format 'host:port' (e.g., '192.168.1.100:8080')")
+                
+                # Map baudrate string to NetworkCANBaudRate enum
+                network_baudrate = NetworkCANBaudRate[baudrate]
+                
+                self.driver = NetworkCANDriver(host=host, port=port)
+                
+                # Test connection first
+                if not self.driver.test_connection():
+                    return False
+                
+                # Connect with the specified baudrate and auto-connect to server
+                if not self.driver.connect(baudrate=network_baudrate, auto_connect_server=True):
                     return False
             
             else:

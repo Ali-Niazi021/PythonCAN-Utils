@@ -300,6 +300,28 @@
   background: #252525;
 }
 
+/* Network device address input */
+.network-address-input {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.network-address-input .network-host {
+  flex: 1;
+  min-width: 100px;
+}
+
+.network-address-input .network-port {
+  width: 60px;
+}
+
+.network-address-input .network-separator {
+  color: #888;
+  font-weight: bold;
+  font-size: 16px;
+}
+
 .checkbox-label {
   display: flex;
   align-items: center;
@@ -861,6 +883,12 @@
   font-weight: 600;
   font-size: 12px;
   color: #ccc;
+}
+
+.header-buttons {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .collapsible-content {

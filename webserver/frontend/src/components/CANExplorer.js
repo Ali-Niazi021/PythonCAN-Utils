@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Send, Trash2, FileText, Filter, Upload, ChevronDown, ChevronRight, ChevronLeft, Activity, Wifi, WifiOff, RefreshCw, Plus, List, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { Send, Trash2, FileText, Filter, Upload, ChevronDown, ChevronRight, ChevronLeft, Activity, Wifi, WifiOff, RefreshCw, List, PanelLeftClose, PanelLeft, Download } from 'lucide-react';
 import TransmitList from './TransmitList';
 import './CANExplorer.css';
 
@@ -35,10 +35,15 @@ function CANExplorer({
   const [deviceType, setDeviceType] = useState('canable');
   const [channel, setChannel] = useState('Device 0');
   const [baudrate, setBaudrate] = useState('BAUD_500K');
+  
+  // Network device specific state
+  const [networkHost, setNetworkHost] = useState('192.168.1.100');
+  const [networkPort, setNetworkPort] = useState('8080');
 
   // Filter devices by type
   const pcanDevices = devices.filter(d => d.device_type === 'pcan');
   const canableDevices = devices.filter(d => d.device_type === 'canable');
+  const networkDevices = devices.filter(d => d.device_type === 'network');
 
   // Update channel when devices are loaded or device type changes
   useEffect(() => {
@@ -59,90 +64,98 @@ function CANExplorer({
         setChannel(pcan[0].name);
       }
     }
+    // Network device uses host:port fields, no channel selection needed
   }, [devices, deviceType]);
 
-  // Persistent count tracking - survives message array trimming
-  const messageCountsRef = useRef(new Map());
-  const lastProcessedTimestampRef = useRef(0);
-
-  // Update counts when new messages arrive
-  useEffect(() => {
-    // Process messages with timestamps newer than the last processed one
-    const newMessages = messages.filter(msg => msg.timestamp > lastProcessedTimestampRef.current);
-    
-    if (newMessages.length > 0) {
-      newMessages.forEach(msg => {
-        const key = msg.id;
-        const currentCount = messageCountsRef.current.get(key) || 0;
-        messageCountsRef.current.set(key, currentCount + 1);
-      });
-      
-      // Update the last processed timestamp to the newest message
-      const latestTimestamp = Math.max(...newMessages.map(m => m.timestamp));
-      lastProcessedTimestampRef.current = latestTimestamp;
-    }
-  }, [messages]);
-
-  // Clear counts when messages are cleared
-  const handleClearMessages = () => {
-    messageCountsRef.current.clear();
-    lastProcessedTimestampRef.current = 0;
-    onClearMessages();
-  };
-
-  // Aggregate messages by CAN ID and calculate cycle time
-  const aggregatedMessages = useMemo(() => {
-    const messageMap = new Map();
-    
-    messages.forEach(msg => {
-      const key = msg.id;
-      if (messageMap.has(key)) {
-        const existing = messageMap.get(key);
-        const timeDiff = msg.timestamp - existing.timestamp;
-        existing.lastTimestamp = existing.timestamp;
-        existing.data = msg.data;
-        existing.timestamp = msg.timestamp;
-        existing.decoded = msg.decoded;
-        // Calculate cycle time (only if we have at least 2 messages)
-        if (timeDiff > 0) {
-          existing.cycleTime = timeDiff;
-        }
-      } else {
-        messageMap.set(key, {
-          id: msg.id,
-          data: msg.data,
-          timestamp: msg.timestamp,
-          lastTimestamp: null,
-          is_extended: msg.is_extended,
-          dlc: msg.dlc,
-          decoded: msg.decoded,
-          cycleTime: null
-        });
-      }
-    });
-
-    // Add persistent counts to each message
-    const messagesWithCounts = Array.from(messageMap.values()).map(msg => ({
-      ...msg,
-      count: messageCountsRef.current.get(msg.id) || 0
-    }));
-
-    return messagesWithCounts.sort((a, b) => a.id - b.id);
-  }, [messages]);
-
-  // Filter messages
+  // Messages are already aggregated by App.js with count and cycleTime
+  // Just need to filter them
   const filteredMessages = useMemo(() => {
-    if (!filterText) return aggregatedMessages;
+    if (!filterText) return messages;
     
     const filter = filterText.toLowerCase();
-    return aggregatedMessages.filter(msg => {
+    return messages.filter(msg => {
       const idHex = msg.id.toString(16).toLowerCase();
       const dataHex = msg.data.map(b => b.toString(16).padStart(2, '0')).join('').toLowerCase();
       const messageName = msg.decoded?.message_name?.toLowerCase() || '';
       
       return idHex.includes(filter) || dataHex.includes(filter) || messageName.includes(filter);
     });
-  }, [aggregatedMessages, filterText]);
+  }, [messages, filterText]);
+
+  // Download filtered messages as CSV
+  const handleDownloadCSV = () => {
+    if (filteredMessages.length === 0) {
+      alert('No messages to download');
+      return;
+    }
+
+    // Build CSV content
+    const headers = ['ID (Hex)', 'ID (Dec)', 'Name', 'Data (Hex)', 'DLC', 'Count', 'Cycle Time (ms)', 'Timestamp', 'Extended'];
+    
+    // Add signal columns if any message has decoded signals
+    const hasSignals = filteredMessages.some(msg => msg.decoded && Object.keys(msg.decoded.signals || {}).length > 0);
+    if (hasSignals) {
+      headers.push('Signals');
+    }
+
+    const rows = filteredMessages.map(msg => {
+      const idHex = msg.is_extended 
+        ? `0x${msg.id.toString(16).padStart(8, '0').toUpperCase()}`
+        : `0x${msg.id.toString(16).padStart(3, '0').toUpperCase()}`;
+      const dataHex = msg.data.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+      const name = msg.decoded?.message_name || '';
+      const cycleTime = msg.cycleTime ? (msg.cycleTime * 1000).toFixed(1) : '';
+      const timestamp = msg.timestamp ? new Date(msg.timestamp * 1000).toISOString() : '';
+      
+      const row = [
+        idHex,
+        msg.id,
+        name,
+        dataHex,
+        msg.dlc || msg.data.length,
+        msg.count || 0,
+        cycleTime,
+        timestamp,
+        msg.is_extended ? 'Yes' : 'No'
+      ];
+
+      if (hasSignals) {
+        // Format signals as "name=value unit; name2=value2 unit2"
+        const signalsStr = msg.decoded?.signals 
+          ? Object.entries(msg.decoded.signals)
+              .map(([name, info]) => `${name}=${info.value}${info.unit ? ' ' + info.unit : ''}`)
+              .join('; ')
+          : '';
+        row.push(signalsStr);
+      }
+
+      return row;
+    });
+
+    // Create CSV string
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => {
+        // Escape cells that contain commas, quotes, or newlines
+        const str = String(cell);
+        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      }).join(','))
+    ].join('\n');
+
+    // Create and trigger download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `can_messages_${new Date().toISOString().slice(0, 19).replace(/[:-]/g, '')}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   const handleLoadDBC = async (event) => {
     const file = event.target.files[0];
@@ -206,9 +219,15 @@ function CANExplorer({
       } else {
         console.log('[CANExplorer] Attempting to connect...');
         
-        // For CANable, extract device index from "Device X: Description" format
+        // Handle channel based on device type
         let channelToSend = channel;
-        if (deviceType === 'canable') {
+        
+        if (deviceType === 'network') {
+          // Network device - combine host and port
+          channelToSend = `${networkHost}:${networkPort}`;
+          console.log('[CANExplorer] Network channel:', channelToSend);
+        } else if (deviceType === 'canable') {
+          // For CANable, extract device index from "Device X: Description" format
           if (typeof channel === 'string' && channel.startsWith('Device ')) {
             try {
               const parts = channel.split(':')[0].split(' ');
@@ -282,6 +301,12 @@ function CANExplorer({
             <div className="sidebar-menu-group">
               <div className="sidebar-menu-header">BMS</div>
               <button
+                className={`sidebar-tab submenu ${activeTab === 'bms-overview' ? 'active' : ''}`}
+                onClick={() => onTabChange('bms-overview')}
+              >
+                Overview
+              </button>
+              <button
                 className={`sidebar-tab submenu ${activeTab === 'bms-status' ? 'active' : ''}`}
                 onClick={() => onTabChange('bms-status')}
               >
@@ -337,47 +362,74 @@ function CANExplorer({
                       setChannel('Device 0');
                     }
                   }
+                  // Network device uses host:port fields, no channel needed
                 }}
                 disabled={connected}
               >
                 <option value="pcan">PCAN-USB</option>
                 <option value="canable">CANable</option>
+                <option value="network">Network</option>
               </select>
             </div>
 
-            <div className="form-group">
-              <label>Channel</label>
-              <select
-                value={channel}
-                onChange={(e) => setChannel(e.target.value)}
-                disabled={connected}
-              >
-                {deviceType === 'pcan' ? (
-                  pcanDevices.length > 0 ? (
-                    pcanDevices.map(device => (
-                      <option key={device.name} value={device.name}>
-                        {device.name} {device.occupied && '(Occupied)'}
-                      </option>
-                    ))
-                  ) : (
-                    <option value="USB1">USB1</option>
-                  )
-                ) : (
-                  canableDevices.length > 0 ? (
-                    canableDevices.map(device => {
-                      const fullName = `Device ${device.index}: ${device.description}`;
-                      return (
-                        <option key={device.index} value={fullName}>
-                          {fullName}
+            {deviceType === 'network' ? (
+              <div className="form-group">
+                <label>Server Address</label>
+                <div className="network-address-input">
+                  <input
+                    type="text"
+                    className="network-host"
+                    value={networkHost}
+                    onChange={(e) => setNetworkHost(e.target.value)}
+                    placeholder="IP Address"
+                    disabled={connected}
+                  />
+                  <span className="network-separator">:</span>
+                  <input
+                    type="text"
+                    className="network-port"
+                    value={networkPort}
+                    onChange={(e) => setNetworkPort(e.target.value)}
+                    placeholder="Port"
+                    disabled={connected}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="form-group">
+                <label>Channel</label>
+                <select
+                  value={channel}
+                  onChange={(e) => setChannel(e.target.value)}
+                  disabled={connected}
+                >
+                  {deviceType === 'pcan' ? (
+                    pcanDevices.length > 0 ? (
+                      pcanDevices.map(device => (
+                        <option key={device.name} value={device.name}>
+                          {device.name} {device.occupied && '(Occupied)'}
                         </option>
-                      );
-                    })
+                      ))
+                    ) : (
+                      <option value="USB1">USB1</option>
+                    )
                   ) : (
-                    <option value="Device 0">Device 0</option>
-                  )
-                )}
-              </select>
-            </div>
+                    canableDevices.length > 0 ? (
+                      canableDevices.map(device => {
+                        const fullName = `Device ${device.index}: ${device.description}`;
+                        return (
+                          <option key={device.index} value={fullName}>
+                            {fullName}
+                          </option>
+                        );
+                      })
+                    ) : (
+                      <option value="Device 0">Device 0</option>
+                    )
+                  )}
+                </select>
+              </div>
+            )}
 
             <div className="form-group">
               <label>Baudrate</label>
@@ -501,13 +553,23 @@ function CANExplorer({
                   <span>Received Messages ({filteredMessages.length})</span>
                 </div>
                 {expandedReceivedMessages && (
-                  <button 
-                    className="btn btn-danger btn-sm" 
-                    onClick={(e) => { e.stopPropagation(); handleClearMessages(); }}
-                  >
-                    <Trash2 size={16} />
-                    Clear All
-                  </button>
+                  <div className="header-buttons">
+                    <button 
+                      className="btn btn-secondary btn-sm" 
+                      onClick={(e) => { e.stopPropagation(); handleDownloadCSV(); }}
+                      title="Download as CSV"
+                    >
+                      <Download size={16} />
+                      Save CSV
+                    </button>
+                    <button 
+                      className="btn btn-danger btn-sm" 
+                      onClick={(e) => { e.stopPropagation(); onClearMessages(); }}
+                    >
+                      <Trash2 size={16} />
+                      Clear All
+                    </button>
+                  </div>
                 )}
               </div>
 

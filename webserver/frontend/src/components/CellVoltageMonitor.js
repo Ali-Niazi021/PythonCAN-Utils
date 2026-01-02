@@ -150,7 +150,7 @@ function CellVoltageMonitor({ messages }) {
               </div>
               <div className="stat-item">
                 <span className="stat-label">Δ:</span>
-                <span className="stat-value">{(stats.delta * 1000).toFixed(1)} mV</span>
+                <span className="stat-value">{stats.delta.toFixed(3)} V</span>
               </div>
             </>
           )}

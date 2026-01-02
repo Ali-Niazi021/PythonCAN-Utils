@@ -26,21 +26,22 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
       // Handle different patterns: "BMS_Heartbeat_0", "Cell_Temp_0_3", "Cell_Voltage_1_3"
       let moduleId = null;
       
-      // For messages with module suffix (e.g., "BMS_Heartbeat_0")
-      const moduleSuffixMatch = msgName.match(/_(\d)$/);
-      if (moduleSuffixMatch) {
-        moduleId = parseInt(moduleSuffixMatch[1]);
+      // For Cell_Temp and Cell_Voltage messages, extract module from thermistor/cell number
+      // These must be checked FIRST because they also end with _X pattern
+      const tempMatch = msgName.match(/Cell_Temp_(\d+)_/);
+      if (tempMatch) {
+        const thermNum = parseInt(tempMatch[1]);
+        moduleId = Math.floor(thermNum / 56); // 56 thermistors per module
       } else {
-        // For Cell_Temp and Cell_Voltage messages, extract module from thermistor/cell number
-        const tempMatch = msgName.match(/Cell_Temp_(\d+)_/);
-        if (tempMatch) {
-          const thermNum = parseInt(tempMatch[1]);
-          moduleId = Math.floor(thermNum / 56); // 56 thermistors per module
+        const voltMatch = msgName.match(/Cell_Voltage_(\d+)_/);
+        if (voltMatch) {
+          const cellNum = parseInt(voltMatch[1]);
+          moduleId = Math.floor((cellNum - 1) / 18); // 18 cells per module, cells start at 1
         } else {
-          const voltMatch = msgName.match(/Cell_Voltage_(\d+)_/);
-          if (voltMatch) {
-            const cellNum = parseInt(voltMatch[1]);
-            moduleId = Math.floor((cellNum - 1) / 18); // 18 cells per module, cells start at 1
+          // For other messages with module suffix (e.g., "BMS_Heartbeat_0")
+          const moduleSuffixMatch = msgName.match(/_(\d)$/);
+          if (moduleSuffixMatch) {
+            moduleId = parseInt(moduleSuffixMatch[1]);
           }
         }
       }
@@ -53,8 +54,8 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
           canStats: null,
           bms1Status: null,
           bms2Status: null,
-          temperatures: [],
-          voltages: [],
+          temperatures: {},  // Changed to object for deduplication
+          voltages: {},      // Changed to object for deduplication
           i2cDiag: null,
           debugInfo: null
         };
@@ -126,25 +127,25 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
       } else if (msgName.startsWith('BMS2_Chip_Status_')) {
         newModuleData[moduleId].bms2Status = msg.decoded.signals;
       } else if (msgName.startsWith('Cell_Temp_')) {
-        // Extract temperature values
+        // Extract temperature values - use object to deduplicate by signal name
         Object.entries(msg.decoded.signals).forEach(([name, signal]) => {
           if (name.startsWith('Temp_')) {
-            newModuleData[moduleId].temperatures.push({
+            newModuleData[moduleId].temperatures[name] = {
               name,
               value: signal.value,
               unit: signal.unit
-            });
+            };
           }
         });
       } else if (msgName.startsWith('Cell_Voltage_')) {
-        // Extract voltage values
+        // Extract voltage values - use object to deduplicate by signal name
         Object.entries(msg.decoded.signals).forEach(([name, signal]) => {
           if (name.includes('Voltage')) {
-            newModuleData[moduleId].voltages.push({
+            newModuleData[moduleId].voltages[name] = {
               name,
               value: signal.value,
               unit: signal.unit
-            });
+            };
           }
         });
       } else if (msgName.startsWith('BMS_I2C_Diagnostics_')) {
@@ -167,8 +168,10 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
     };
 
     Object.values(moduleData).forEach(module => {
-      if (module.temperatures.length > 0) combined.temperatures.push(...module.temperatures);
-      if (module.voltages.length > 0) combined.voltages.push(...module.voltages);
+      const temps = Object.values(module.temperatures || {});
+      const volts = Object.values(module.voltages || {});
+      if (temps.length > 0) combined.temperatures.push(...temps);
+      if (volts.length > 0) combined.voltages.push(...volts);
       if (module.heartbeat) {
         combined.activeModules++;
         const faultCount = module.heartbeat.Fault_Count?.value || 0;
@@ -350,15 +353,16 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
     canStats, 
     bms1Status, 
     bms2Status, 
-    temperatures = [], 
-    voltages = [], 
+    temperatures = {}, 
+    voltages = {}, 
     i2cDiag, 
     debugInfo 
   } = module;
 
   // Use combined data if "All Modules" is selected
-  const displayTemps = isAllModulesView ? combinedData.temperatures : temperatures;
-  const displayVolts = isAllModulesView ? combinedData.voltages : voltages;
+  // Convert object to array for single module view
+  const displayTemps = isAllModulesView ? combinedData.temperatures : Object.values(temperatures);
+  const displayVolts = isAllModulesView ? combinedData.voltages : Object.values(voltages);
 
   // Calculate min/max temps and voltages
   const tempValues = displayTemps.map(t => t.value).filter(v => v != null);
@@ -541,21 +545,21 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
                 <div className="stat-row">
                   <TrendingDown size={16} className="stat-icon" />
                   <span>Min:</span>
-                  <span className="stat-value">{minVolt !== null ? `${minVolt} mV` : '--'}</span>
+                  <span className="stat-value">{minVolt !== null ? `${(minVolt/1000).toFixed(3)} V` : '--'}</span>
                 </div>
                 <div className="stat-row">
                   <TrendingUp size={16} className="stat-icon" />
                   <span>Max:</span>
-                  <span className="stat-value">{maxVolt !== null ? `${maxVolt} mV` : '--'}</span>
+                  <span className="stat-value">{maxVolt !== null ? `${(maxVolt/1000).toFixed(3)} V` : '--'}</span>
                 </div>
                 <div className="stat-row">
                   <span>Avg:</span>
-                  <span className="stat-value">{avgVolt !== null ? `${avgVolt} mV` : '--'}</span>
+                  <span className="stat-value">{avgVolt !== null ? `${(avgVolt/1000).toFixed(3)} V` : '--'}</span>
                 </div>
                 <div className="stat-row">
                   <span>Delta:</span>
                   <span className="stat-value">
-                    {minVolt !== null && maxVolt !== null ? `${maxVolt - minVolt} mV` : '--'}
+                    {minVolt !== null && maxVolt !== null ? `${((maxVolt - minVolt)/1000).toFixed(3)} V` : '--'}
                   </span>
                 </div>
               </div>
@@ -571,7 +575,7 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
                 <div className="card-content">
                   <div className="stat-row">
                     <span>Stack Voltage:</span>
-                    <span className="stat-value">{bms1Status.BMS1_Stack_Voltage?.value || '--'} mV</span>
+                    <span className="stat-value">{bms1Status.BMS1_Stack_Voltage?.value ? `${(bms1Status.BMS1_Stack_Voltage.value/1000).toFixed(2)} V` : '--'}</span>
                   </div>
                   <div className="stat-row">
                     <span>Temperature:</span>
@@ -595,7 +599,7 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
                 <div className="card-content">
                   <div className="stat-row">
                     <span>Stack Voltage:</span>
-                    <span className="stat-value">{bms2Status.BMS2_Stack_Voltage?.value || '--'} mV</span>
+                    <span className="stat-value">{bms2Status.BMS2_Stack_Voltage?.value ? `${(bms2Status.BMS2_Stack_Voltage.value/1000).toFixed(2)} V` : '--'}</span>
                   </div>
                   <div className="stat-row">
                     <span>Temperature:</span>
@@ -689,84 +693,155 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
 
           {/* Individual Module Status Cards - Only for all modules view */}
           {isAllModulesView && (
-            <div className="module-cards-section">
-              <h3 className="section-title">Individual Module Status</h3>
-              <div className="module-cards-grid">
+            <div className="modules-grid-section">
+              <div className="modules-grid">
                 {[0, 1, 2, 3, 4, 5].map(moduleId => {
                   const modData = moduleData[moduleId];
-                  if (!modData) {
-                    return (
-                      <div key={moduleId} className="module-card inactive">
-                        <div className="module-card-header">
-                          <span className="module-id">Module {moduleId}</span>
-                          <span className="module-status offline">OFFLINE</span>
-                        </div>
-                        <div className="module-card-content">
-                          <p className="no-data-text">No data received</p>
-                        </div>
-                      </div>
-                    );
-                  }
+                  const modState = modData?.heartbeat?.BMS_State?.value || 'OFFLINE';
+                  const modFaultCount = modData?.heartbeat?.Fault_Count?.value || 0;
+                  const hasFault = modFaultCount > 0 || modState === 'FAULT';
+                  const modErrorFlags = getErrorFlags(moduleId);
 
                   // Calculate module-specific stats
-                  const modTempValues = modData.temperatures.map(t => t.value).filter(v => v != null);
+                  const modTempValues = Object.values(modData?.temperatures || {}).map(t => t.value).filter(v => v != null);
                   const modMinTemp = modTempValues.length > 0 ? Math.min(...modTempValues) : null;
                   const modMaxTemp = modTempValues.length > 0 ? Math.max(...modTempValues) : null;
+                  const modAvgTemp = modTempValues.length > 0 ? modTempValues.reduce((a, b) => a + b, 0) / modTempValues.length : null;
 
-                  const modVoltValues = modData.voltages.map(v => v.value).filter(v => v != null);
+                  const modVoltValues = Object.values(modData?.voltages || {}).map(v => v.value).filter(v => v != null);
                   const modMinVolt = modVoltValues.length > 0 ? Math.min(...modVoltValues) : null;
                   const modMaxVolt = modVoltValues.length > 0 ? Math.max(...modVoltValues) : null;
                   const modAvgVolt = modVoltValues.length > 0 ? Math.round(modVoltValues.reduce((a, b) => a + b, 0) / modVoltValues.length) : null;
 
-                  const modState = modData.heartbeat?.BMS_State?.value || 'UNKNOWN';
-                  const modFaultCount = modData.heartbeat?.Fault_Count?.value || 0;
-                  const hasFault = modFaultCount > 0 || modState === 'FAULT';
-                  
-                  // Get error flags for this module from history
-                  const modErrorFlags = getErrorFlags(moduleId);
+                  // BMS chip stats
+                  const bms1Voltage = modData?.bms1Status?.BMS1_Stack_Voltage?.value;
+                  const bms2Voltage = modData?.bms2Status?.BMS2_Stack_Voltage?.value;
+                  const bms1Temp = modData?.bms1Status?.BMS1_TS2_Temperature?.value;
+                  const bms2Temp = modData?.bms2Status?.BMS2_TS2_Temperature?.value;
+
+                  // CAN stats
+                  const canRx = modData?.canStats?.RX_Message_Count?.value;
+                  const canTxOk = modData?.canStats?.TX_Success_Count?.value;
+                  const canTxErr = modData?.canStats?.TX_Error_Count?.value;
 
                   return (
-                    <div key={moduleId} className={`module-card ${hasFault ? 'has-fault' : 'active'}`}>
-                      <div className="module-card-header">
-                        <span className="module-id">Module {moduleId}</span>
-                        <span className={`module-status ${modState.toLowerCase()}`}>{modState}</span>
+                    <div key={moduleId} className={`module-column ${!modData ? 'offline' : hasFault ? 'has-fault' : 'active'}`}>
+                      <div className="module-header">
+                        <span className="module-title">Module {moduleId}</span>
+                        <span className={`status-badge ${modState.toLowerCase()}`}>{modState}</span>
                       </div>
-                      <div className="module-card-content">
-                        <div className="module-stat">
-                          <Thermometer size={14} />
-                          <span className="stat-label">Temp:</span>
-                          <span className="stat-values">
-                            {modMinTemp !== null && modMaxTemp !== null 
-                              ? `${modMinTemp.toFixed(1)}°C - ${modMaxTemp.toFixed(1)}°C`
-                              : '--'}
-                          </span>
-                        </div>
-                        <div className="module-stat">
-                          <Zap size={14} />
-                          <span className="stat-label">Voltage:</span>
-                          <span className="stat-values">
-                            {modMinVolt !== null && modMaxVolt !== null 
-                              ? `${modMinVolt} / ${modAvgVolt} / ${modMaxVolt} mV`
-                              : '--'}
-                          </span>
-                        </div>
-                        {hasFault && (
-                          <div className="module-stat fault">
-                            <AlertTriangle size={14} />
-                            <span className="stat-label">Faults:</span>
-                            <span className="stat-values error">{modFaultCount}</span>
+                      
+                      <div className="module-content">
+                        {!modData ? (
+                          <div className="module-offline">
+                            <Info size={20} />
+                            <span>No data</span>
                           </div>
-                        )}
-                        
-                        {/* Fault Flags List */}
-                        {modErrorFlags.length > 0 && (
-                          <div className="module-fault-flags">
-                            {modErrorFlags.map((flag, idx) => (
-                              <div key={idx} className={`mini-fault-flag flag-${flag.type}`}>
-                                {flag.msg}
+                        ) : (
+                          <>
+                            {/* Fault Section */}
+                            {hasFault && (
+                              <div className="module-section fault-section">
+                                <div className="section-label fault">
+                                  <AlertTriangle size={12} />
+                                  <span>Faults ({modFaultCount})</span>
+                                </div>
+                                <div className="fault-tags">
+                                  {modErrorFlags.map((flag, idx) => (
+                                    <span key={idx} className={`fault-tag fault-${flag.type}`}>
+                                      {flag.msg}
+                                    </span>
+                                  ))}
+                                </div>
                               </div>
-                            ))}
-                          </div>
+                            )}
+
+                            {/* Temperature Section */}
+                            <div className="module-section">
+                              <div className="section-label">
+                                <Thermometer size={12} />
+                                <span>Temperature</span>
+                              </div>
+                              <div className="stat-row-compact">
+                                <div className="stat-mini">
+                                  <span className="stat-label-mini">Min</span>
+                                  <span className="stat-value-mini">{modMinTemp !== null ? `${modMinTemp.toFixed(1)}°` : '--'}</span>
+                                </div>
+                                <div className="stat-mini">
+                                  <span className="stat-label-mini">Avg</span>
+                                  <span className="stat-value-mini highlight">{modAvgTemp !== null ? `${modAvgTemp.toFixed(1)}°` : '--'}</span>
+                                </div>
+                                <div className="stat-mini">
+                                  <span className="stat-label-mini">Max</span>
+                                  <span className="stat-value-mini">{modMaxTemp !== null ? `${modMaxTemp.toFixed(1)}°` : '--'}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Voltage Section */}
+                            <div className="module-section">
+                              <div className="section-label">
+                                <Zap size={12} />
+                                <span>Cell Voltage</span>
+                              </div>
+                              <div className="stat-row-compact">
+                                <div className="stat-mini">
+                                  <span className="stat-label-mini">Min</span>
+                                  <span className="stat-value-mini">{modMinVolt !== null ? `${(modMinVolt/1000).toFixed(3)}` : '--'}</span>
+                                </div>
+                                <div className="stat-mini">
+                                  <span className="stat-label-mini">Avg</span>
+                                  <span className="stat-value-mini highlight">{modAvgVolt !== null ? `${(modAvgVolt/1000).toFixed(3)}` : '--'}</span>
+                                </div>
+                                <div className="stat-mini">
+                                  <span className="stat-label-mini">Max</span>
+                                  <span className="stat-value-mini">{modMaxVolt !== null ? `${(modMaxVolt/1000).toFixed(3)}` : '--'}</span>
+                                </div>
+                              </div>
+                              {modMinVolt !== null && modMaxVolt !== null && (
+                                <div className="delta-row">
+                                  <span>Δ {((modMaxVolt - modMinVolt)/1000).toFixed(3)} V</span>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* BMS Chips Section */}
+                            {(bms1Voltage || bms2Voltage) && (
+                              <div className="module-section">
+                                <div className="section-label">
+                                  <Info size={12} />
+                                  <span>BMS Chips</span>
+                                </div>
+                                <div className="chips-grid">
+                                  <div className="chip-stat">
+                                    <span className="chip-label">BMS1</span>
+                                    <span className="chip-value">{bms1Voltage ? `${(bms1Voltage/1000).toFixed(2)}V` : '--'}</span>
+                                    <span className="chip-temp">{bms1Temp ? `${bms1Temp.toFixed(1)}°` : ''}</span>
+                                  </div>
+                                  <div className="chip-stat">
+                                    <span className="chip-label">BMS2</span>
+                                    <span className="chip-value">{bms2Voltage ? `${(bms2Voltage/1000).toFixed(2)}V` : '--'}</span>
+                                    <span className="chip-temp">{bms2Temp ? `${bms2Temp.toFixed(1)}°` : ''}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* CAN Stats Section */}
+                            {canRx !== undefined && (
+                              <div className="module-section">
+                                <div className="section-label">
+                                  <Activity size={12} />
+                                  <span>CAN Bus</span>
+                                </div>
+                                <div className="can-stats-compact">
+                                  <span className="can-stat">RX: {canRx}</span>
+                                  <span className="can-stat good">TX: {canTxOk}</span>
+                                  {canTxErr > 0 && <span className="can-stat bad">ERR: {canTxErr}</span>}
+                                </div>
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
                     </div>

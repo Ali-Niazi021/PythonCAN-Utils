@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Wifi, WifiOff, RefreshCw, Zap } from 'lucide-react';
+import { Wifi, WifiOff, RefreshCw, Zap, Globe } from 'lucide-react';
 import './ConnectionPanel.css';
 
 function ConnectionPanel({ connected, devices, onConnect, onDisconnect, onRefreshDevices }) {
@@ -7,6 +7,23 @@ function ConnectionPanel({ connected, devices, onConnect, onDisconnect, onRefres
   const [channel, setChannel] = useState('Device 0');
   const [baudrate, setBaudrate] = useState('BAUD_500K');
   const [connecting, setConnecting] = useState(false);
+  
+  // Network device specific state - load from localStorage or use defaults
+  const [networkHost, setNetworkHost] = useState(() => {
+    return localStorage.getItem('networkDeviceHost') || '192.168.1.100';
+  });
+  const [networkPort, setNetworkPort] = useState(() => {
+    return localStorage.getItem('networkDevicePort') || '8080';
+  });
+
+  // Save network settings to localStorage when they change
+  useEffect(() => {
+    localStorage.setItem('networkDeviceHost', networkHost);
+  }, [networkHost]);
+
+  useEffect(() => {
+    localStorage.setItem('networkDevicePort', networkPort);
+  }, [networkPort]);
 
   const baudrates = [
     'BAUD_1M', 'BAUD_800K', 'BAUD_500K', 'BAUD_250K',
@@ -16,6 +33,7 @@ function ConnectionPanel({ connected, devices, onConnect, onDisconnect, onRefres
   // Split devices by type
   const pcanDevices = devices.filter(d => d.device_type === 'pcan');
   const canableDevices = devices.filter(d => d.device_type === 'canable');
+  const networkDevices = devices.filter(d => d.device_type === 'network');
 
   // Update channel when devices are loaded or device type changes
   useEffect(() => {
@@ -43,6 +61,7 @@ function ConnectionPanel({ connected, devices, onConnect, onDisconnect, onRefres
         setChannel(newChannel);
       }
     }
+    // Network devices don't need channel selection - they use host:port
   }, [devices, deviceType]);
 
   const handleConnect = async () => {
@@ -50,9 +69,15 @@ function ConnectionPanel({ connected, devices, onConnect, onDisconnect, onRefres
     
     console.log('[ConnectionPanel] handleConnect called:', { deviceType, channel, baudrate });
     
-    // For CANable, extract the device index from "Device X: Description" format
     let channelToSend = channel;
-    if (deviceType === 'canable') {
+    
+    // Handle network device - combine host and port
+    if (deviceType === 'network') {
+      channelToSend = `${networkHost}:${networkPort}`;
+      console.log('[ConnectionPanel] Network channel:', channelToSend);
+    }
+    // For CANable, extract the device index from "Device X: Description" format
+    else if (deviceType === 'canable') {
       if (typeof channel === 'string' && channel.startsWith('Device ')) {
         try {
           const parts = channel.split(':')[0].split(' ');
@@ -120,47 +145,74 @@ function ConnectionPanel({ connected, devices, onConnect, onDisconnect, onRefres
                     setChannel('Device 0');
                   }
                 }
+                // Network device uses host:port fields, no channel needed
               }}
               disabled={connected}
             >
               <option value="pcan">PCAN</option>
               <option value="canable">CANable</option>
+              <option value="network">Network</option>
             </select>
           </div>
 
-          <div className="form-group">
-            <label>Channel</label>
-            <select
-              value={channel}
-              onChange={(e) => setChannel(e.target.value)}
-              disabled={connected}
-            >
-              {deviceType === 'pcan' ? (
-                pcanDevices.length > 0 ? (
-                  pcanDevices.map(device => (
-                    <option key={device.name} value={device.name}>
-                      {device.name} {device.occupied && '(Occupied)'}
-                    </option>
-                  ))
-                ) : (
-                  <option value="USB1">USB1</option>
-                )
-              ) : (
-                canableDevices.length > 0 ? (
-                  canableDevices.map(device => {
-                    const fullName = `Device ${device.index}: ${device.description}`;
-                    return (
-                      <option key={device.index} value={fullName}>
-                        {fullName}
+          {deviceType === 'network' ? (
+            <div className="form-group network-inputs">
+              <label>Server Address</label>
+              <div className="network-address-group">
+                <input
+                  type="text"
+                  className="network-host-input"
+                  value={networkHost}
+                  onChange={(e) => setNetworkHost(e.target.value)}
+                  placeholder="IP Address"
+                  disabled={connected}
+                />
+                <span className="network-separator">:</span>
+                <input
+                  type="text"
+                  className="network-port-input"
+                  value={networkPort}
+                  onChange={(e) => setNetworkPort(e.target.value)}
+                  placeholder="Port"
+                  disabled={connected}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="form-group">
+              <label>Channel</label>
+              <select
+                value={channel}
+                onChange={(e) => setChannel(e.target.value)}
+                disabled={connected}
+              >
+                {deviceType === 'pcan' ? (
+                  pcanDevices.length > 0 ? (
+                    pcanDevices.map(device => (
+                      <option key={device.name} value={device.name}>
+                        {device.name} {device.occupied && '(Occupied)'}
                       </option>
-                    );
-                  })
+                    ))
+                  ) : (
+                    <option value="USB1">USB1</option>
+                  )
                 ) : (
-                  <option value="Device 0">Device 0</option>
-                )
-              )}
-            </select>
-          </div>
+                  canableDevices.length > 0 ? (
+                    canableDevices.map(device => {
+                      const fullName = `Device ${device.index}: ${device.description}`;
+                      return (
+                        <option key={device.index} value={fullName}>
+                          {fullName}
+                        </option>
+                      );
+                    })
+                  ) : (
+                    <option value="Device 0">Device 0</option>
+                  )
+                )}
+              </select>
+            </div>
+          )}
 
           <div className="form-group">
             <label>Baudrate</label>

@@ -1,0 +1,100 @@
+{
+  "dbc_file": "brz_gr86_gen2_asc.dbc",
+  "items": [
+    {
+      "id": "1767077477634-0.9568664649125573",
+      "can_id": 2015,
+      "data": [
+        2,
+        1,
+        12,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "is_extended": false,
+      "message_name": null,
+      "signals": null,
+      "description": "Custom message 0x7df"
+    },
+    {
+      "id": "1767086817584-0.007423273710351008",
+      "can_id": 1872,
+      "data": [
+        236,
+        4,
+        48,
+        1,
+        1,
+        128,
+        0,
+        0
+      ],
+      "is_extended": false,
+      "message_name": null,
+      "signals": null,
+      "description": "Custom message 0x750"
+    },
+    {
+      "id": "1767089055819-0.9749083688395779",
+      "can_id": 940,
+      "data": [
+        0,
+        0,
+        0,
+        128,
+        0,
+        0,
+        0,
+        6
+      ],
+      "is_extended": false,
+      "message_name": "VEHICLE_STATUS",
+      "signals": {
+        "IGNITION_ACCESSORY": 0,
+        "IGNITION_ON": 0,
+        "IGNITION_OFF": 1,
+        "DRIVER_DOOR_OPEN": 0,
+        "PASSENGER_DOOR_OPEN": 0,
+        "TRUNK_OPEN": 0,
+        "AMBIENT_LIGHT_BRIGHT": 0,
+        "REVERSE_LIGHTS_ON": 0,
+        "HANDBRAKE_ENGAGED": 0,
+        "BRAKE_LIGHTS_ON": 0,
+        "PARKING_LIGHTS_ON": 0,
+        "HEADLIGHTS_ON": 1,
+        "HIGH_BEAM_ON": 1,
+        "REAR_FOG_LIGHTS": 0,
+        "WIPERS_MOVING": 0
+      },
+      "description": "DBC: VEHICLE_STATUS"
+    },
+    {
+      "id": "1767089544834-0.8017415191083243",
+      "can_id": 912,
+      "data": [
+        0,
+        0,
+        31,
+        0,
+        80,
+        0,
+        0,
+        0
+      ],
+      "is_extended": false,
+      "message_name": "AMBIENT",
+      "signals": {
+        "REGION_CONFIG": 31,
+        "AIR_TEMPERATURE": 0,
+        "BRIGHTNESS_DIAL": 0,
+        "DRIVER_SEATBELT_UNBUCKLED": 0,
+        "LEFT_TURN_SIGNAL": 0,
+        "RIGHT_TURN_SIGNAL": 0
+      },
+      "description": "DBC: AMBIENT"
+    }
+  ]
+}

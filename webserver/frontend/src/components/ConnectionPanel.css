@@ -147,6 +147,64 @@
   border: 1px solid rgba(102, 126, 234, 0.2);
 }
 
+/* Network device input styles */
+.network-inputs {
+  min-width: 220px;
+}
+
+.network-address-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.network-host-input {
+  flex: 1;
+  padding: 10px 12px;
+  background: rgba(30, 37, 56, 0.8);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  border-radius: 8px;
+  color: #e0e0e0;
+  font-size: 14px;
+  min-width: 120px;
+  transition: all 0.3s ease;
+}
+
+.network-port-input {
+  width: 70px;
+  padding: 10px 12px;
+  background: rgba(30, 37, 56, 0.8);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  border-radius: 8px;
+  color: #e0e0e0;
+  font-size: 14px;
+  transition: all 0.3s ease;
+}
+
+.network-host-input:hover:not(:disabled),
+.network-port-input:hover:not(:disabled) {
+  border-color: #667eea;
+}
+
+.network-host-input:focus,
+.network-port-input:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.network-host-input:disabled,
+.network-port-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.network-separator {
+  color: #a0aec0;
+  font-weight: bold;
+  font-size: 18px;
+}
+
 .spinner-small {
   border: 2px solid rgba(255, 255, 255, 0.3);
   border-top: 2px solid white;
