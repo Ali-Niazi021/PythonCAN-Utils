@@ -4,6 +4,24 @@ import { apiService } from '../services/api';
 import FirmwareFlasher from './FirmwareFlasher';
 import './BMSStatus.css';
 
+// Helper function to extract signal value - handles both local DBC decoding (object with .value/.raw)
+// and server-side decoding (raw value directly)
+const getSignalValue = (signal, defaultValue = 0) => {
+  if (signal === undefined || signal === null) return defaultValue;
+  if (typeof signal === 'number') return signal;
+  if (typeof signal === 'object') {
+    return signal.raw ?? signal.value ?? defaultValue;
+  }
+  return defaultValue;
+};
+
+const getSignalUnit = (signal, defaultUnit = '') => {
+  if (typeof signal === 'object' && signal !== null) {
+    return signal.unit ?? defaultUnit;
+  }
+  return defaultUnit;
+};
+
 function BMSStatus({ messages, onSendMessage, dbcFile }) {
   const [moduleData, setModuleData] = useState({});
   const [selectedModule, setSelectedModule] = useState('all'); // 'all' or 0-5
@@ -66,10 +84,10 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
         newModuleData[moduleId].heartbeat = msg.decoded.signals;
         
         // Update fault history when we see a heartbeat
-        const byte0 = msg.decoded.signals.Error_Flags_Byte0?.raw ?? msg.decoded.signals.Error_Flags_Byte0?.value ?? 0;
-        const byte1 = msg.decoded.signals.Error_Flags_Byte1?.raw ?? msg.decoded.signals.Error_Flags_Byte1?.value ?? 0;
-        const byte2 = msg.decoded.signals.Error_Flags_Byte2?.raw ?? msg.decoded.signals.Error_Flags_Byte2?.value ?? 0;
-        const byte3 = msg.decoded.signals.Error_Flags_Byte3?.raw ?? msg.decoded.signals.Error_Flags_Byte3?.value ?? 0;
+        const byte0 = getSignalValue(msg.decoded.signals.Error_Flags_Byte0);
+        const byte1 = getSignalValue(msg.decoded.signals.Error_Flags_Byte1);
+        const byte2 = getSignalValue(msg.decoded.signals.Error_Flags_Byte2);
+        const byte3 = getSignalValue(msg.decoded.signals.Error_Flags_Byte3);
 
         const activeFaults = [];
         
@@ -132,8 +150,8 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
           if (name.startsWith('Temp_')) {
             newModuleData[moduleId].temperatures[name] = {
               name,
-              value: signal.value,
-              unit: signal.unit
+              value: getSignalValue(signal),
+              unit: getSignalUnit(signal, '°C')
             };
           }
         });
@@ -143,8 +161,8 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
           if (name.includes('Voltage')) {
             newModuleData[moduleId].voltages[name] = {
               name,
-              value: signal.value,
-              unit: signal.unit
+              value: getSignalValue(signal),
+              unit: getSignalUnit(signal, 'mV')
             };
           }
         });
@@ -174,7 +192,7 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
       if (volts.length > 0) combined.voltages.push(...volts);
       if (module.heartbeat) {
         combined.activeModules++;
-        const faultCount = module.heartbeat.Fault_Count?.value || 0;
+        const faultCount = getSignalValue(module.heartbeat.Fault_Count);
         combined.totalErrors += faultCount;
       }
     });
@@ -203,7 +221,7 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
         const moduleMatch = msgName.match(/_(\d)$/);
         if (moduleMatch) {
           const modId = parseInt(moduleMatch[1]);
-          const status = msg.decoded.signals.Status?.value || 'Unknown';
+          const status = getSignalValue(msg.decoded.signals.Status, 'Unknown');
           setCommandStatus(prev => ({
             ...prev,
             [`chip_reset_${modId}`]: {
@@ -444,14 +462,14 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
                 </div>
                 <div className="card-content">
                   {heartbeat.BMS_State && (
-                    <div className={`bms-state ${getBMSStateClass(heartbeat.BMS_State.value)}`}>
-                      {heartbeat.BMS_State.value || 'UNKNOWN'}
+                    <div className={`bms-state ${getBMSStateClass(getSignalValue(heartbeat.BMS_State, 'UNKNOWN'))}`}>
+                      {getSignalValue(heartbeat.BMS_State, 'UNKNOWN')}
                     </div>
                   )}
-                  {heartbeat.Fault_Count && (
+                  {heartbeat.Fault_Count !== undefined && (
                     <div className="stat-row">
                       <span>Fault Count:</span>
-                      <span className="stat-value">{heartbeat.Fault_Count.value}</span>
+                      <span className="stat-value">{getSignalValue(heartbeat.Fault_Count)}</span>
                     </div>
                   )}
                   
@@ -473,7 +491,7 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
                     </div>
                   )}
                   
-                  {errorFlags.length === 0 && heartbeat.Fault_Count?.value === 0 && (
+                  {errorFlags.length === 0 && getSignalValue(heartbeat.Fault_Count) === 0 && (
                     <div className="no-faults">
                       <CheckCircle size={16} />
                       <span>No Active Faults</span>
@@ -575,15 +593,15 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
                 <div className="card-content">
                   <div className="stat-row">
                     <span>Stack Voltage:</span>
-                    <span className="stat-value">{bms1Status.BMS1_Stack_Voltage?.value ? `${(bms1Status.BMS1_Stack_Voltage.value/1000).toFixed(2)} V` : '--'}</span>
+                    <span className="stat-value">{getSignalValue(bms1Status.BMS1_Stack_Voltage) ? `${(getSignalValue(bms1Status.BMS1_Stack_Voltage)/1000).toFixed(2)} V` : '--'}</span>
                   </div>
                   <div className="stat-row">
                     <span>Temperature:</span>
-                    <span className="stat-value">{bms1Status.BMS1_TS2_Temperature?.value?.toFixed(1) || '--'}°C</span>
+                    <span className="stat-value">{getSignalValue(bms1Status.BMS1_TS2_Temperature) ? getSignalValue(bms1Status.BMS1_TS2_Temperature).toFixed(1) : '--'}°C</span>
                   </div>
                   <div className="stat-row">
                     <span>Alarm Status:</span>
-                    <span className="stat-value">0x{(bms1Status.BMS1_Alarm_Status?.value || 0).toString(16).toUpperCase().padStart(4, '0')}</span>
+                    <span className="stat-value">0x{getSignalValue(bms1Status.BMS1_Alarm_Status).toString(16).toUpperCase().padStart(4, '0')}</span>
                   </div>
                 </div>
               </div>
@@ -599,15 +617,15 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
                 <div className="card-content">
                   <div className="stat-row">
                     <span>Stack Voltage:</span>
-                    <span className="stat-value">{bms2Status.BMS2_Stack_Voltage?.value ? `${(bms2Status.BMS2_Stack_Voltage.value/1000).toFixed(2)} V` : '--'}</span>
+                    <span className="stat-value">{getSignalValue(bms2Status.BMS2_Stack_Voltage) ? `${(getSignalValue(bms2Status.BMS2_Stack_Voltage)/1000).toFixed(2)} V` : '--'}</span>
                   </div>
                   <div className="stat-row">
                     <span>Temperature:</span>
-                    <span className="stat-value">{bms2Status.BMS2_TS2_Temperature?.value?.toFixed(1) || '--'}°C</span>
+                    <span className="stat-value">{getSignalValue(bms2Status.BMS2_TS2_Temperature) ? getSignalValue(bms2Status.BMS2_TS2_Temperature).toFixed(1) : '--'}°C</span>
                   </div>
                   <div className="stat-row">
                     <span>Alarm Status:</span>
-                    <span className="stat-value">0x{(bms2Status.BMS2_Alarm_Status?.value || 0).toString(16).toUpperCase().padStart(4, '0')}</span>
+                    <span className="stat-value">0x{getSignalValue(bms2Status.BMS2_Alarm_Status).toString(16).toUpperCase().padStart(4, '0')}</span>
                   </div>
                 </div>
               </div>
@@ -697,8 +715,8 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
               <div className="modules-grid">
                 {[0, 1, 2, 3, 4, 5].map(moduleId => {
                   const modData = moduleData[moduleId];
-                  const modState = modData?.heartbeat?.BMS_State?.value || 'OFFLINE';
-                  const modFaultCount = modData?.heartbeat?.Fault_Count?.value || 0;
+                  const modState = getSignalValue(modData?.heartbeat?.BMS_State, 'OFFLINE');
+                  const modFaultCount = getSignalValue(modData?.heartbeat?.Fault_Count);
                   const hasFault = modFaultCount > 0 || modState === 'FAULT';
                   const modErrorFlags = getErrorFlags(moduleId);
 
@@ -714,15 +732,15 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
                   const modAvgVolt = modVoltValues.length > 0 ? Math.round(modVoltValues.reduce((a, b) => a + b, 0) / modVoltValues.length) : null;
 
                   // BMS chip stats
-                  const bms1Voltage = modData?.bms1Status?.BMS1_Stack_Voltage?.value;
-                  const bms2Voltage = modData?.bms2Status?.BMS2_Stack_Voltage?.value;
-                  const bms1Temp = modData?.bms1Status?.BMS1_TS2_Temperature?.value;
-                  const bms2Temp = modData?.bms2Status?.BMS2_TS2_Temperature?.value;
+                  const bms1Voltage = getSignalValue(modData?.bms1Status?.BMS1_Stack_Voltage, null);
+                  const bms2Voltage = getSignalValue(modData?.bms2Status?.BMS2_Stack_Voltage, null);
+                  const bms1Temp = getSignalValue(modData?.bms1Status?.BMS1_TS2_Temperature, null);
+                  const bms2Temp = getSignalValue(modData?.bms2Status?.BMS2_TS2_Temperature, null);
 
                   // CAN stats
-                  const canRx = modData?.canStats?.RX_Message_Count?.value;
-                  const canTxOk = modData?.canStats?.TX_Success_Count?.value;
-                  const canTxErr = modData?.canStats?.TX_Error_Count?.value;
+                  const canRx = getSignalValue(modData?.canStats?.RX_Message_Count, null);
+                  const canTxOk = getSignalValue(modData?.canStats?.TX_Success_Count, null);
+                  const canTxErr = getSignalValue(modData?.canStats?.TX_Error_Count, null);
 
                   return (
                     <div key={moduleId} className={`module-column ${!modData ? 'offline' : hasFault ? 'has-fault' : 'active'}`}>

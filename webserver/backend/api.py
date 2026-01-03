@@ -372,6 +372,17 @@ class CANBackend:
             self.start_time = datetime.now()
             self.message_count = 0
             
+            # For Network driver, upload DBC to server if already loaded locally
+            if device_type == DeviceType.NETWORK and self.dbc_file_path:
+                try:
+                    if hasattr(self.driver, 'upload_dbc'):
+                        if self.driver.upload_dbc(self.dbc_file_path):
+                            print(f"[Connect] DBC uploaded to remote server: {self.dbc_file_path}")
+                        else:
+                            print(f"[Connect] Warning: Failed to upload DBC to remote server")
+                except Exception as e:
+                    print(f"[Connect] Warning: DBC upload failed: {e}")
+            
             return True
             
         except Exception as e:
@@ -417,13 +428,30 @@ class CANBackend:
         return status
     
     def load_dbc_file(self, file_path: str) -> bool:
-        """Load a DBC file for message decoding"""
+        """Load a DBC file for message decoding
+        
+        For Network driver: uploads DBC to remote server for server-side decoding
+        For local drivers (PCAN, CANable): loads DBC locally for client-side decoding
+        """
         if not DBC_SUPPORT:
             return False
         
         try:
+            # Always load locally for DBC message info and local decoding fallback
             self.dbc_database = cantools.database.load_file(file_path, strict=False)
             self.dbc_file_path = file_path
+            
+            # For Network driver, also upload DBC to remote server for server-side decoding
+            if self.device_type == DeviceType.NETWORK and self.driver:
+                try:
+                    if hasattr(self.driver, 'upload_dbc'):
+                        if self.driver.upload_dbc(file_path):
+                            print(f"[DBC] Uploaded to remote server: {file_path}")
+                        else:
+                            print(f"[DBC] Warning: Failed to upload to remote server, using local decoding")
+                except Exception as e:
+                    print(f"[DBC] Warning: Remote upload failed: {e}, using local decoding")
+            
             return True
         except Exception as e:
             print(f"DBC load error: {e}")
@@ -579,8 +607,25 @@ class CANBackend:
         if self.message_count <= 5:
             print(f"[RX] Message #{self.message_count}: ID=0x{msg.id:X}, Extended={msg.is_extended}, DLC={msg.dlc}, Data={msg.data.hex()}")
         
-        # Try to decode if DBC available
-        if self.dbc_database:
+        # Check for server-decoded data (Network driver with DBC loaded on server)
+        if hasattr(msg, 'server_decoded') and msg.server_decoded:
+            # Use server-decoded data - convert signals list to dict format
+            server_decoded = msg.server_decoded
+            if server_decoded.get('message_name') or server_decoded.get('signals'):
+                signals = {}
+                if server_decoded.get('signals'):
+                    for sig in server_decoded['signals']:
+                        if isinstance(sig, dict):
+                            signals[sig.get('name', 'unknown')] = sig.get('value', 0)
+                
+                message_data['decoded'] = {
+                    'message_name': server_decoded.get('message_name'),
+                    'signals': signals
+                }
+                if self.message_count <= 5:
+                    print(f"[RX] Server-decoded: {server_decoded.get('message_name')}")
+        # Fallback to local DBC decoding if no server-decoded data
+        elif self.dbc_database:
             decoded = self.decode_message(msg.id, msg.data, msg.is_extended)
             if decoded:
                 message_data['decoded'] = decoded
@@ -590,10 +635,15 @@ class CANBackend:
         
         # Schedule broadcast on the event loop (if available)
         if self.loop and self.loop.is_running():
+            if self.message_count <= 5:
+                print(f"[RX] Broadcasting to {len(self.active_connections)} clients, loop running: {self.loop.is_running()}")
             asyncio.run_coroutine_threadsafe(
                 self.broadcast_message(message_data),
                 self.loop
             )
+        else:
+            if self.message_count <= 5:
+                print(f"[RX] NOT broadcasting - loop={self.loop}, running={self.loop.is_running() if self.loop else 'N/A'}")
     
     async def broadcast_message(self, message: dict):
         """Broadcast message to all connected WebSocket clients"""
@@ -615,11 +665,13 @@ class CANBackend:
         """Add a WebSocket connection"""
         await websocket.accept()
         self.active_connections.append(websocket)
+        print(f"[WS] WebSocket connected, total clients: {len(self.active_connections)}")
     
     def remove_websocket_connection(self, websocket: WebSocket):
         """Remove a WebSocket connection"""
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
+            print(f"[WS] WebSocket disconnected, remaining clients: {len(self.active_connections)}")
 
 
 # ============================================================================

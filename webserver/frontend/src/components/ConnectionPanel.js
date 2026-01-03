@@ -10,18 +10,24 @@ function ConnectionPanel({ connected, devices, onConnect, onDisconnect, onRefres
   
   // Network device specific state - load from localStorage or use defaults
   const [networkHost, setNetworkHost] = useState(() => {
-    return localStorage.getItem('networkDeviceHost') || '192.168.1.100';
+    const saved = localStorage.getItem('networkDeviceHost');
+    console.log('[ConnectionPanel] Loading networkHost from localStorage:', saved);
+    return saved || '192.168.1.100';
   });
   const [networkPort, setNetworkPort] = useState(() => {
-    return localStorage.getItem('networkDevicePort') || '8080';
+    const saved = localStorage.getItem('networkDevicePort');
+    console.log('[ConnectionPanel] Loading networkPort from localStorage:', saved);
+    return saved || '8080';
   });
 
   // Save network settings to localStorage when they change
   useEffect(() => {
+    console.log('[ConnectionPanel] Saving networkHost to localStorage:', networkHost);
     localStorage.setItem('networkDeviceHost', networkHost);
   }, [networkHost]);
 
   useEffect(() => {
+    console.log('[ConnectionPanel] Saving networkPort to localStorage:', networkPort);
     localStorage.setItem('networkDevicePort', networkPort);
   }, [networkPort]);
 

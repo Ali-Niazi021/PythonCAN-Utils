@@ -5,6 +5,7 @@ import ConnectionPanel from './components/ConnectionPanel';
 import CANExplorer from './components/CANExplorer';
 import ThermistorMonitor from './components/ThermistorMonitor';
 import CellVoltageMonitor from './components/CellVoltageMonitor';
+import ModuleConfig from './components/ModuleConfig';
 import BMSOverview from './components/BMSOverview';
 import BMSStatus from './components/BMSStatus';
 import StatusBar from './components/StatusBar';
@@ -34,6 +35,17 @@ function App() {
   const messageBufferRef = useRef([]);
   const flushIntervalRef = useRef(null);
   const messageCountsRef = useRef(new Map()); // Track total counts per CAN ID
+  
+  // Raw message callbacks for components that need to see ALL messages (not aggregated)
+  const rawMessageCallbacksRef = useRef([]);
+  
+  // Register/unregister callbacks for raw messages
+  const registerRawMessageCallback = useCallback((callback) => {
+    rawMessageCallbacksRef.current.push(callback);
+    return () => {
+      rawMessageCallbacksRef.current = rawMessageCallbacksRef.current.filter(cb => cb !== callback);
+    };
+  }, []);
 
   // Start periodic flushing when connected
   useEffect(() => {
@@ -152,6 +164,15 @@ function App() {
 
   const connectWebSocket = useCallback(() => {
     websocketService.connect((message) => {
+      // Notify raw message callbacks (for components like ModuleConfig that need ALL messages)
+      rawMessageCallbacksRef.current.forEach(callback => {
+        try {
+          callback(message);
+        } catch (e) {
+          console.error('[App] Raw message callback error:', e);
+        }
+      });
+      
       // Buffer incoming messages - they'll be flushed by the interval
       messageBufferRef.current.push(message);
     });
@@ -358,6 +379,32 @@ function App() {
             onTabChange={setActiveTab}
           >
             <CellVoltageMonitor messages={messages} />
+          </CANExplorer>
+        )}
+        {activeTab === 'module-config' && (
+          <CANExplorer
+            connected={connected}
+            messages={messages}
+            onClearMessages={handleClearMessages}
+            onSendMessage={handleSendMessage}
+            onLoadDBC={handleLoadDBC}
+            dbcLoaded={dbcLoaded}
+            dbcFile={dbcFile}
+            devices={devices}
+            onConnect={handleConnect}
+            onDisconnect={handleDisconnect}
+            onRefreshDevices={fetchDevices}
+            connectionStatus={connectionStatus}
+            stats={stats}
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+          >
+            <ModuleConfig 
+              messages={messages} 
+              onSendMessage={handleSendMessage}
+              connected={connected}
+              onRegisterRawCallback={registerRawMessageCallback}
+            />
           </CANExplorer>
         )}
       </div>

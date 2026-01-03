@@ -41,6 +41,8 @@ class CANMessage:
     is_extended: bool = False
     is_remote: bool = False
     dlc: int = 0
+    # Server-decoded data (for Network driver with DBC loaded on server)
+    server_decoded: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
         if self.dlc == 0:
@@ -64,7 +66,7 @@ class NetworkCANDriver:
         self._receive_callback: Optional[Callable[[CANMessage], None]] = None
         self._stop_receive: bool = False
         self._session: Optional[requests.Session] = None
-        self._poll_interval: float = 0.05  # 50ms polling interval
+        self._poll_interval: float = 0.1  # 100ms polling interval
         self._last_timestamp: float = 0.0
         self._server_info: Dict[str, Any] = {}
         
@@ -280,18 +282,104 @@ class NetworkCANDriver:
             print(f"[NetworkCAN] Send error: {e}")
             return False
     
+    def set_poll_interval(self, interval: float):
+        """
+        Set the polling interval for fetching messages.
+        
+        Args:
+            interval: Poll interval in seconds (e.g., 0.1 for 100ms, 0.5 for 500ms)
+        """
+        self._poll_interval = max(0.01, interval)  # Minimum 10ms
+        print(f"[NetworkCAN] Poll interval set to {self._poll_interval}s")
+    
+    def upload_dbc(self, dbc_file_path: str) -> bool:
+        """
+        Upload a DBC file to the remote server for message decoding.
+        
+        Args:
+            dbc_file_path: Path to the DBC file to upload
+            
+        Returns:
+            True if upload successful
+        """
+        if not self._connected or not self._session:
+            print("[NetworkCAN] Not connected")
+            return False
+        
+        try:
+            # Read the DBC file content
+            with open(dbc_file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                dbc_content = f.read()
+            
+            # Upload to server (POST /api/dbc with raw text content)
+            response = self._session.post(
+                f"{self._base_url}/api/dbc",
+                data=dbc_content,
+                headers={'Content-Type': 'text/plain'},
+                timeout=10.0
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('success'):
+                    print(f"[NetworkCAN] DBC uploaded: {result.get('message', 'OK')}")
+                    return True
+                else:
+                    print(f"[NetworkCAN] DBC upload failed: {result.get('error', 'Unknown error')}")
+                    return False
+            else:
+                print(f"[NetworkCAN] DBC upload failed: HTTP {response.status_code}")
+                return False
+                
+        except FileNotFoundError:
+            print(f"[NetworkCAN] DBC file not found: {dbc_file_path}")
+            return False
+        except Exception as e:
+            print(f"[NetworkCAN] DBC upload error: {e}")
+            return False
+    
+    def unload_dbc(self) -> bool:
+        """
+        Unload/remove the DBC file from the remote server.
+        
+        Returns:
+            True if unload successful
+        """
+        if not self._connected or not self._session:
+            print("[NetworkCAN] Not connected")
+            return False
+        
+        try:
+            response = self._session.delete(
+                f"{self._base_url}/api/dbc",
+                timeout=5.0
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('success'):
+                    print(f"[NetworkCAN] DBC unloaded")
+                    return True
+            return False
+                
+        except Exception as e:
+            print(f"[NetworkCAN] DBC unload error: {e}")
+            return False
+    
     def _receive_loop(self):
         """Background thread for polling messages from the server."""
-        print("[NetworkCAN] Receive thread started")
+        print(f"[NetworkCAN] Receive thread started (poll interval: {self._poll_interval}s)")
         error_count = 0
         max_errors = 10
+        messages_received_total = 0
+        first_batch = True
         
         while not self._stop_receive and self._connected:
             try:
-                # Poll for new messages
+                # Poll for new messages with larger batch size
                 response = self._session.get(
                     f"{self._base_url}/api/messages",
-                    params={'count': 100},
+                    params={'count': 200},  # Request larger batches
                     timeout=5.0
                 )
                 
@@ -300,13 +388,34 @@ class NetworkCANDriver:
                     if data.get('success'):
                         messages = data.get('messages', [])
                         
+                        # Debug first batch to understand timestamp format
+                        if first_batch and messages:
+                            print(f"[NetworkCAN] First batch: {len(messages)} messages")
+                            if len(messages) > 0:
+                                sample = messages[0]
+                                print(f"[NetworkCAN] Sample message: id={sample.get('id')}, ts={sample.get('timestamp')}, data={sample.get('data')}")
+                            first_batch = False
+                        
+                        # Sort messages by timestamp for correct ordering when batching
+                        messages = sorted(messages, key=lambda m: m.get('timestamp', 0))
+                        
+                        # Debug: Log batch info periodically
+                        batch_count = 0
+                        
                         for msg_data in messages:
                             # Skip messages we've already seen
                             timestamp = msg_data.get('timestamp', 0)
+                            
+                            # Debug: log first few skipped messages
+                            if timestamp <= self._last_timestamp and messages_received_total < 5:
+                                print(f"[NetworkCAN] Skipping msg: ts={timestamp} <= last_ts={self._last_timestamp}")
+                            
                             if timestamp <= self._last_timestamp:
                                 continue
                             
                             self._last_timestamp = timestamp
+                            batch_count += 1
+                            messages_received_total += 1
                             
                             # Parse message data
                             msg_id = msg_data.get('id', 0)
@@ -325,14 +434,23 @@ class NetworkCANDriver:
                             
                             is_extended = msg_data.get('is_extended', msg_id > 0x7FF)
                             
-                            # Create CAN message
+                            # Extract server-decoded data if present (when DBC loaded on server)
+                            server_decoded = None
+                            if msg_data.get('message_name') or msg_data.get('signals'):
+                                server_decoded = {
+                                    'message_name': msg_data.get('message_name'),
+                                    'signals': msg_data.get('signals')  # List of {name, value, unit}
+                                }
+                            
+                            # Create CAN message with server-decoded data
                             can_msg = CANMessage(
                                 id=msg_id,
                                 data=raw_data,
                                 timestamp=timestamp,
                                 is_extended=is_extended,
                                 is_remote=msg_data.get('is_remote', False),
-                                dlc=msg_data.get('dlc', len(raw_data))
+                                dlc=msg_data.get('dlc', len(raw_data)),
+                                server_decoded=server_decoded
                             )
                             
                             # Call callback
@@ -342,9 +460,14 @@ class NetworkCANDriver:
                                 except Exception as e:
                                     print(f"[NetworkCAN] Callback error: {e}")
                         
+                        # Debug: Log batch statistics periodically
+                        if batch_count > 0 and messages_received_total <= 10:
+                            print(f"[NetworkCAN] Received batch: {batch_count} new messages (total: {messages_received_total})")
+                        
                         error_count = 0  # Reset error count on success
                 else:
                     error_count += 1
+                    print(f"[NetworkCAN] Server returned status {response.status_code}")
                     
             except requests.exceptions.Timeout:
                 error_count += 1
@@ -386,13 +509,16 @@ class NetworkCANDriver:
         
         self._receive_callback = callback
         self._stop_receive = False
-        self._last_timestamp = time.time()  # Only get new messages from now
+        self._last_timestamp = 0.0  # Start from 0 to accept all server messages
         
         # Clear the message buffer on the server before starting
         try:
-            self._session.delete(f"{self._base_url}/api/messages", timeout=5.0)
-        except:
-            pass
+            resp = self._session.delete(f"{self._base_url}/api/messages", timeout=5.0)
+            print(f"[NetworkCAN] Buffer clear response: {resp.status_code}")
+        except Exception as e:
+            print(f"[NetworkCAN] Buffer clear failed (may not be supported): {e}")
+        
+        print(f"[NetworkCAN] Starting receive thread with last_timestamp={self._last_timestamp}")
         
         self._receive_thread = threading.Thread(target=self._receive_loop, daemon=True)
         self._receive_thread.start()

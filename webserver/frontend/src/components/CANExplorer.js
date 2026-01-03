@@ -36,9 +36,22 @@ function CANExplorer({
   const [channel, setChannel] = useState('Device 0');
   const [baudrate, setBaudrate] = useState('BAUD_500K');
   
-  // Network device specific state
-  const [networkHost, setNetworkHost] = useState('192.168.1.100');
-  const [networkPort, setNetworkPort] = useState('8080');
+  // Network device specific state - load from localStorage for persistence
+  const [networkHost, setNetworkHost] = useState(() => {
+    return localStorage.getItem('networkDeviceHost') || '192.168.1.100';
+  });
+  const [networkPort, setNetworkPort] = useState(() => {
+    return localStorage.getItem('networkDevicePort') || '8080';
+  });
+
+  // Save network settings to localStorage when they change
+  useEffect(() => {
+    localStorage.setItem('networkDeviceHost', networkHost);
+  }, [networkHost]);
+
+  useEffect(() => {
+    localStorage.setItem('networkDevicePort', networkPort);
+  }, [networkPort]);
 
   // Filter devices by type
   const pcanDevices = devices.filter(d => d.device_type === 'pcan');
@@ -323,6 +336,12 @@ function CANExplorer({
                 onClick={() => onTabChange('voltage')}
               >
                 Cell Voltages
+              </button>
+              <button
+                className={`sidebar-tab submenu ${activeTab === 'module-config' ? 'active' : ''}`}
+                onClick={() => onTabChange('module-config')}
+              >
+                Module Config
               </button>
             </div>
           </div>
