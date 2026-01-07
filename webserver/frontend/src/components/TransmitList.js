@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Send, Plus, Trash2, ChevronRight, ChevronDown } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Send, Plus, Trash2, ChevronRight, ChevronDown, Edit2, Play, Square } from 'lucide-react';
 import { apiService } from '../services/api';
 import './TransmitList.css';
 
@@ -10,6 +10,8 @@ function TransmitList({ dbcFile, onSendMessage }) {
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [dbcMessages, setDbcMessages] = useState([]);
   const [editingItem, setEditingItem] = useState(null);
+  const [cyclicSending, setCyclicSending] = useState({}); // { itemId: true/false }
+  const cyclicIntervalsRef = useRef({}); // Store interval IDs
 
   // Load transmit list when DBC file changes
   useEffect(() => {
@@ -107,6 +109,73 @@ function TransmitList({ dbcFile, onSendMessage }) {
     setExpandedId(expandedId === id ? null : id);
   };
 
+  // Update an existing item in the transmit list
+  const handleUpdateItem = (updatedItem) => {
+    const newItems = transmitItems.map(item => 
+      item.id === updatedItem.id ? updatedItem : item
+    );
+    setTransmitItems(newItems);
+    saveTransmitList(newItems);
+    setEditingItem(null);
+    setShowAddDialog(false);
+  };
+
+  // Toggle cyclic sending for an item
+  const toggleCyclicSending = useCallback((item) => {
+    const itemId = item.id;
+    
+    if (cyclicSending[itemId]) {
+      // Stop cyclic sending
+      if (cyclicIntervalsRef.current[itemId]) {
+        clearInterval(cyclicIntervalsRef.current[itemId]);
+        delete cyclicIntervalsRef.current[itemId];
+      }
+      setCyclicSending(prev => ({ ...prev, [itemId]: false }));
+      console.log(`Stopped cyclic sending for ${item.message_name || '0x' + item.can_id.toString(16)}`);
+    } else {
+      // Start cyclic sending
+      const cycleTime = item.cycle_time || 100; // Default 100ms
+      
+      // Send immediately first
+      handleSendItem(item);
+      
+      // Then set up interval
+      const intervalId = setInterval(() => {
+        handleSendItem(item);
+      }, cycleTime);
+      
+      cyclicIntervalsRef.current[itemId] = intervalId;
+      setCyclicSending(prev => ({ ...prev, [itemId]: true }));
+      console.log(`Started cyclic sending for ${item.message_name || '0x' + item.can_id.toString(16)} every ${cycleTime}ms`);
+    }
+  }, [cyclicSending, transmitItems]);
+
+  // Cleanup all intervals on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(cyclicIntervalsRef.current).forEach(intervalId => {
+        clearInterval(intervalId);
+      });
+    };
+  }, []);
+
+  // Update cyclic interval when item's cycle_time changes
+  useEffect(() => {
+    Object.keys(cyclicSending).forEach(itemId => {
+      if (cyclicSending[itemId]) {
+        const item = transmitItems.find(i => i.id === itemId);
+        if (item && cyclicIntervalsRef.current[itemId]) {
+          // Clear old interval and set new one with updated cycle time
+          clearInterval(cyclicIntervalsRef.current[itemId]);
+          const cycleTime = item.cycle_time || 100;
+          cyclicIntervalsRef.current[itemId] = setInterval(() => {
+            handleSendItem(item);
+          }, cycleTime);
+        }
+      }
+    });
+  }, [transmitItems]);
+
   return (
     <div className="transmit-list">
       <div className="transmit-list-header">
@@ -130,7 +199,8 @@ function TransmitList({ dbcFile, onSendMessage }) {
                 <th style={{width: '70px'}}>ID</th>
                 <th>Name</th>
                 <th style={{width: '180px'}}>Data</th>
-                <th style={{width: '70px'}}>Actions</th>
+                <th style={{width: '60px'}}>Cycle</th>
+                <th style={{width: '100px'}}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -166,17 +236,49 @@ function TransmitList({ dbcFile, onSendMessage }) {
                           {item.data.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}
                         </span>
                       </td>
+                      <td className="cycle-cell">
+                        {item.cycle_time ? (
+                          <span className={`cycle-time ${cyclicSending[item.id] ? 'active' : ''}`}>
+                            {item.cycle_time}ms
+                          </span>
+                        ) : (
+                          <span className="cycle-time disabled">-</span>
+                        )}
+                      </td>
                       <td className="actions-cell">
+                        {item.cycle_time > 0 && (
+                          <button
+                            className={`btn btn-icon btn-xs ${cyclicSending[item.id] ? 'btn-cyclic-active' : 'btn-cyclic'}`}
+                            onClick={(e) => { e.stopPropagation(); toggleCyclicSending(item); }}
+                            title={cyclicSending[item.id] ? 'Stop cyclic sending' : 'Start cyclic sending'}
+                          >
+                            {cyclicSending[item.id] ? <Square size={12} /> : <Play size={12} />}
+                          </button>
+                        )}
                         <button
                           className="btn btn-icon btn-xs btn-success"
                           onClick={(e) => { e.stopPropagation(); handleSendItem(item); }}
-                          title="Send"
+                          title="Send once"
                         >
                           <Send size={12} />
                         </button>
                         <button
+                          className="btn btn-icon btn-xs btn-edit"
+                          onClick={(e) => { e.stopPropagation(); setEditingItem(item); setShowAddDialog(true); }}
+                          title="Edit"
+                        >
+                          <Edit2 size={12} />
+                        </button>
+                        <button
                           className="btn btn-icon btn-xs btn-danger"
-                          onClick={(e) => { e.stopPropagation(); handleRemoveItem(item.id); }}
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            // Stop cyclic sending if active
+                            if (cyclicSending[item.id]) {
+                              toggleCyclicSending(item);
+                            }
+                            handleRemoveItem(item.id); 
+                          }}
                           title="Remove"
                         >
                           <Trash2 size={12} />
@@ -185,7 +287,7 @@ function TransmitList({ dbcFile, onSendMessage }) {
                     </tr>
                     {isExpanded && hasSignals && (
                       <tr className="signals-row">
-                        <td colSpan="5">
+                        <td colSpan="6">
                           <div className="signals-dropdown">
                             <table className="signals-table">
                               <thead>
@@ -219,7 +321,9 @@ function TransmitList({ dbcFile, onSendMessage }) {
         <AddTransmitDialog
           dbcMessages={dbcMessages}
           onAdd={handleAddItem}
-          onCancel={() => setShowAddDialog(false)}
+          onUpdate={handleUpdateItem}
+          onCancel={() => { setShowAddDialog(false); setEditingItem(null); }}
+          editingItem={editingItem}
         />
       )}
 
@@ -231,22 +335,55 @@ function TransmitList({ dbcFile, onSendMessage }) {
 }
 
 // Dialog for adding a new transmit message
-function AddTransmitDialog({ dbcMessages, onAdd, onCancel }) {
-  const [mode, setMode] = useState('dbc'); // 'dbc' or 'custom'
-  const [selectedMessage, setSelectedMessage] = useState('');
-  const [customId, setCustomId] = useState('123');
-  const [customData, setCustomData] = useState('00 00 00 00 00 00 00 00');
-  const [dbcData, setDbcData] = useState('00 00 00 00 00 00 00 00');
-  const [isExtended, setIsExtended] = useState(false);
-  const [description, setDescription] = useState('');
-  const [signalValues, setSignalValues] = useState({});
-  const [editMode, setEditMode] = useState('signals'); // 'signals' or 'raw'
+function AddTransmitDialog({ dbcMessages, onAdd, onUpdate, onCancel, editingItem }) {
+  const isEditing = !!editingItem;
+  
+  // Determine initial mode based on editing item
+  const getInitialMode = () => {
+    if (editingItem) {
+      return editingItem.message_name ? 'dbc' : 'custom';
+    }
+    return 'dbc';
+  };
+  
+  const [mode, setMode] = useState(getInitialMode);
+  const [selectedMessage, setSelectedMessage] = useState(editingItem?.message_name || '');
+  const [customId, setCustomId] = useState(
+    editingItem && !editingItem.message_name 
+      ? editingItem.can_id.toString(16).toUpperCase() 
+      : '123'
+  );
+  const [customData, setCustomData] = useState(
+    editingItem && !editingItem.message_name
+      ? editingItem.data.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')
+      : '00 00 00 00 00 00 00 00'
+  );
+  const [dbcData, setDbcData] = useState(
+    editingItem?.message_name
+      ? editingItem.data.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')
+      : '00 00 00 00 00 00 00 00'
+  );
+  const [isExtended, setIsExtended] = useState(editingItem?.is_extended || false);
+  const [description, setDescription] = useState(editingItem?.description || '');
+  const [signalValues, setSignalValues] = useState(editingItem?.signals || {});
+  const [editMode, setEditMode] = useState(
+    editingItem?.signals && Object.keys(editingItem.signals).length > 0 ? 'signals' : 'raw'
+  );
+  const [cycleTime, setCycleTime] = useState(editingItem?.cycle_time || 0);
 
   const selectedDbcMessage = dbcMessages.find(m => m.name === selectedMessage);
 
-  // Update dbcData when a DBC message is selected
+  // Update dbcData when a DBC message is selected (but not during initial edit load)
+  const initialLoadRef = useRef(true);
   useEffect(() => {
     if (selectedDbcMessage) {
+      // If editing and this is the initial load, use the existing values
+      if (isEditing && initialLoadRef.current && editingItem?.message_name === selectedMessage) {
+        initialLoadRef.current = false;
+        return;
+      }
+      initialLoadRef.current = false;
+      
       const length = selectedDbcMessage.length || 8;
       const zeros = Array(length).fill(0).map(b => '00').join(' ');
       setDbcData(zeros);
@@ -311,13 +448,14 @@ function AddTransmitDialog({ dbcMessages, onAdd, onCancel }) {
       const isExt = encodedResponse ? encodedResponse.is_extended : selectedDbcMessage.is_extended;
       
       item = {
-        id: `${Date.now()}-${Math.random()}`,
+        id: isEditing ? editingItem.id : `${Date.now()}-${Math.random()}`,
         can_id: canId,
         data: dataBytes,
         is_extended: isExt,
         message_name: selectedDbcMessage.name,
         signals: editMode === 'signals' ? signalValues : null,
-        description: description || `DBC: ${selectedDbcMessage.name}`
+        description: description || `DBC: ${selectedDbcMessage.name}`,
+        cycle_time: cycleTime > 0 ? cycleTime : null
       };
     } else {
       // Custom message
@@ -330,24 +468,29 @@ function AddTransmitDialog({ dbcMessages, onAdd, onCancel }) {
       }
       
       item = {
-        id: `${Date.now()}-${Math.random()}`,
+        id: isEditing ? editingItem.id : `${Date.now()}-${Math.random()}`,
         can_id: id,
         data: dataBytes,
         is_extended: isExtended,
         message_name: null,
         signals: null,
-        description: description || `Custom message 0x${id.toString(16)}`
+        description: description || `Custom message 0x${id.toString(16)}`,
+        cycle_time: cycleTime > 0 ? cycleTime : null
       };
     }
     
-    onAdd(item);
+    if (isEditing) {
+      onUpdate(item);
+    } else {
+      onAdd(item);
+    }
   };
 
   return (
     <div className="modal-overlay" onClick={onCancel}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>Add Transmit Message</h3>
+          <h3>{isEditing ? 'Edit Transmit Message' : 'Add Transmit Message'}</h3>
         </div>
         
         <div className="modal-body">
@@ -545,6 +688,22 @@ function AddTransmitDialog({ dbcMessages, onAdd, onCancel }) {
               className="form-control"
             />
           </div>
+
+          <div className="form-group">
+            <label>Cycle Time (ms) - Set to 0 for manual send only</label>
+            <input
+              type="number"
+              value={cycleTime}
+              onChange={(e) => setCycleTime(parseInt(e.target.value) || 0)}
+              placeholder="0"
+              min="0"
+              step="10"
+              className="form-control"
+            />
+            <small style={{ color: '#666', fontSize: '10px', marginTop: '4px', display: 'block' }}>
+              Enter a value greater than 0 to enable continuous cyclic sending (e.g., 100 = send every 100ms)
+            </small>
+          </div>
         </div>
 
         <div className="modal-footer">
@@ -556,7 +715,7 @@ function AddTransmitDialog({ dbcMessages, onAdd, onCancel }) {
             onClick={handleAdd}
             disabled={mode === 'dbc' && !selectedMessage}
           >
-            Add to List
+            {isEditing ? 'Save Changes' : 'Add to List'}
           </button>
         </div>
       </div>

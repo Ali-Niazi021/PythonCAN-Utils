@@ -131,8 +131,8 @@
   overflow: auto;
   padding: clamp(6px, 0.5vh, 12px);
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-  gap: clamp(4px, 0.4vw, 8px);
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: clamp(8px, 1vw, 16px);
   align-content: start;
 }
 
@@ -143,6 +143,51 @@
   border: 1px solid #2a2a2a;
   display: flex;
   flex-direction: column;
+  transition: all 0.3s ease;
+}
+
+/* Responding module - red theme */
+.module-card.responding {
+  border-color: #dc2626;
+}
+
+.module-card.responding .module-card-header {
+  background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+  border-bottom: 2px solid #dc2626;
+}
+
+/* Non-responding module - greyed out */
+.module-card.not-responding {
+  opacity: 0.6;
+  border-color: #333;
+}
+
+.module-card.not-responding .module-card-header {
+  background: linear-gradient(135deg, #374151 0%, #1f2937 100%);
+  border-bottom: 2px solid #4b5563;
+}
+
+.module-card.not-responding .module-card-header h3 {
+  color: #9ca3af;
+}
+
+.module-card.not-responding .can-id-badge {
+  background: rgba(0, 0, 0, 0.2);
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.module-card.not-responding:hover {
+  opacity: 0.8;
+}
+
+.offline-badge {
+  font-size: 9px;
+  padding: 2px 6px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 3px;
+  color: #fbbf24;
+  font-weight: 600;
+  text-transform: uppercase;
 }
 
 .module-card-header {

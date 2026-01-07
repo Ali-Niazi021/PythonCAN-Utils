@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Send, Trash2, FileText, Filter, Upload, ChevronDown, ChevronRight, ChevronLeft, Activity, Wifi, WifiOff, RefreshCw, List, PanelLeftClose, PanelLeft, Download } from 'lucide-react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { Send, Trash2, FileText, Filter, Upload, ChevronDown, ChevronRight, ChevronLeft, Activity, Wifi, WifiOff, RefreshCw, List, PanelLeftClose, PanelLeft, Download, X, Eye, EyeOff, Flag } from 'lucide-react';
 import TransmitList from './TransmitList';
 import './CANExplorer.css';
 
@@ -19,9 +19,11 @@ function CANExplorer({
   stats,
   activeTab,
   onTabChange,
+  onRegisterRawCallback,
   children
 }) {
   const [filterText, setFilterText] = useState('');
+  const [sortOption, setSortOption] = useState('id-asc'); // 'id-asc', 'id-desc', 'name-asc', 'name-desc'
   const [expandedRows, setExpandedRows] = useState(new Set());
   const [expandedReceivedMessages, setExpandedReceivedMessages] = useState(true);
   const [expandedTransmitList, setExpandedTransmitList] = useState(false);
@@ -30,6 +32,18 @@ function CANExplorer({
   const [filterExpanded, setFilterExpanded] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const fileInputRef = useRef(null);
+  
+  // Message Isolation feature state
+  const [isolatedIds, setIsolatedIds] = useState(new Set());
+  const [isolatedMessages, setIsolatedMessages] = useState([]);
+  const [isolationPanelOpen, setIsolationPanelOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState({ show: false, x: 0, y: 0, message: null });
+  const [autoScroll, setAutoScroll] = useState(true);
+  const [hideDuplicates, setHideDuplicates] = useState(false);
+  const isolatedMessagesRef = useRef([]);
+  const isolationContentRef = useRef(null);
+  const MAX_ISOLATED_MESSAGES = 1000; // Limit to prevent memory issues
+  const DUPLICATE_TIME_THRESHOLD_MS = 1; // Messages within 1ms with same data are duplicates
   
   // Connection form state
   const [deviceType, setDeviceType] = useState('canable');
@@ -52,6 +66,52 @@ function CANExplorer({
   useEffect(() => {
     localStorage.setItem('networkDevicePort', networkPort);
   }, [networkPort]);
+
+  // Register raw message callback for isolation feature
+  useEffect(() => {
+    if (!onRegisterRawCallback) return;
+    
+    const handleRawMessage = (message) => {
+      // Only capture messages for isolated IDs
+      if (isolatedIds.has(message.id)) {
+        const newMessage = {
+          ...message,
+          sequenceNum: isolatedMessagesRef.current.length + 1,
+          capturedAt: Date.now()
+        };
+        
+        isolatedMessagesRef.current = [
+          ...isolatedMessagesRef.current.slice(-MAX_ISOLATED_MESSAGES + 1),
+          newMessage
+        ];
+        
+        // Update state periodically (every 100ms is handled by the interval below)
+      }
+    };
+    
+    const unregister = onRegisterRawCallback(handleRawMessage);
+    return () => unregister();
+  }, [onRegisterRawCallback, isolatedIds]);
+  
+  // Update isolated messages state periodically for UI rendering
+  useEffect(() => {
+    if (isolatedIds.size === 0) return;
+    
+    const interval = setInterval(() => {
+      if (isolatedMessagesRef.current.length !== isolatedMessages.length) {
+        setIsolatedMessages([...isolatedMessagesRef.current]);
+      }
+    }, 100);
+    
+    return () => clearInterval(interval);
+  }, [isolatedIds, isolatedMessages.length]);
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    if (autoScroll && isolationContentRef.current && isolatedMessages.length > 0) {
+      isolationContentRef.current.scrollTop = isolationContentRef.current.scrollHeight;
+    }
+  }, [autoScroll, isolatedMessages.length]);
 
   // Filter devices by type
   const pcanDevices = devices.filter(d => d.device_type === 'pcan');
@@ -81,19 +141,46 @@ function CANExplorer({
   }, [devices, deviceType]);
 
   // Messages are already aggregated by App.js with count and cycleTime
-  // Just need to filter them
+  // Filter and sort them
   const filteredMessages = useMemo(() => {
-    if (!filterText) return messages;
+    let result = messages;
     
-    const filter = filterText.toLowerCase();
-    return messages.filter(msg => {
-      const idHex = msg.id.toString(16).toLowerCase();
-      const dataHex = msg.data.map(b => b.toString(16).padStart(2, '0')).join('').toLowerCase();
-      const messageName = msg.decoded?.message_name?.toLowerCase() || '';
-      
-      return idHex.includes(filter) || dataHex.includes(filter) || messageName.includes(filter);
+    // Apply filter
+    if (filterText) {
+      const filter = filterText.toLowerCase();
+      result = result.filter(msg => {
+        const idHex = msg.id.toString(16).toLowerCase();
+        const dataHex = msg.data.map(b => b.toString(16).padStart(2, '0')).join('').toLowerCase();
+        const messageName = msg.decoded?.message_name?.toLowerCase() || '';
+        
+        return idHex.includes(filter) || dataHex.includes(filter) || messageName.includes(filter);
+      });
+    }
+    
+    // Apply sorting
+    const sorted = [...result].sort((a, b) => {
+      switch (sortOption) {
+        case 'id-asc':
+          return a.id - b.id;
+        case 'id-desc':
+          return b.id - a.id;
+        case 'name-asc': {
+          const nameA = a.decoded?.message_name || '';
+          const nameB = b.decoded?.message_name || '';
+          return nameA.localeCompare(nameB);
+        }
+        case 'name-desc': {
+          const nameA = a.decoded?.message_name || '';
+          const nameB = b.decoded?.message_name || '';
+          return nameB.localeCompare(nameA);
+        }
+        default:
+          return a.id - b.id;
+      }
     });
-  }, [messages, filterText]);
+    
+    return sorted;
+  }, [messages, filterText, sortOption]);
 
   // Download filtered messages as CSV
   const handleDownloadCSV = () => {
@@ -134,9 +221,15 @@ function CANExplorer({
 
       if (hasSignals) {
         // Format signals as "name=value unit; name2=value2 unit2"
+        // Handles both network driver format (direct value) and local decoding format (object with value/unit)
         const signalsStr = msg.decoded?.signals 
           ? Object.entries(msg.decoded.signals)
-              .map(([name, info]) => `${name}=${info.value}${info.unit ? ' ' + info.unit : ''}`)
+              .map(([name, info]) => {
+                const isObject = typeof info === 'object' && info !== null && !Array.isArray(info);
+                const value = isObject ? info.value : info;
+                const unit = isObject && info.unit ? ` ${info.unit}` : '';
+                return `${name}=${value}${unit}`;
+              })
               .join('; ')
           : '';
         row.push(signalsStr);
@@ -221,6 +314,234 @@ function CANExplorer({
   const formatData = (data) => {
     return data.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
   };
+
+  // Message Isolation feature handlers
+  const handleContextMenu = (event, message) => {
+    event.preventDefault();
+    setContextMenu({
+      show: true,
+      x: event.clientX,
+      y: event.clientY,
+      message: message
+    });
+  };
+
+  const closeContextMenu = () => {
+    setContextMenu({ show: false, x: 0, y: 0, message: null });
+  };
+
+  // Close context menu on click elsewhere
+  useEffect(() => {
+    const handleClick = () => closeContextMenu();
+    if (contextMenu.show) {
+      document.addEventListener('click', handleClick);
+      return () => document.removeEventListener('click', handleClick);
+    }
+  }, [contextMenu.show]);
+
+  const addIsolatedId = (id) => {
+    setIsolatedIds(prev => {
+      const newSet = new Set(prev);
+      newSet.add(id);
+      return newSet;
+    });
+    setIsolationPanelOpen(true);
+    closeContextMenu();
+  };
+
+  const removeIsolatedId = (id) => {
+    setIsolatedIds(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(id);
+      return newSet;
+    });
+    // Also remove messages for this ID
+    isolatedMessagesRef.current = isolatedMessagesRef.current.filter(m => m.id !== id);
+    setIsolatedMessages(prev => prev.filter(m => m.id !== id));
+  };
+
+  const clearIsolatedMessages = () => {
+    isolatedMessagesRef.current = [];
+    setIsolatedMessages([]);
+  };
+
+  const addCheckpoint = () => {
+    // Use the timestamp from the last message, not computer time
+    // This is important for network driver which delivers messages in batches
+    const lastMessage = isolatedMessagesRef.current.filter(m => !m.isCheckpoint).slice(-1)[0];
+    const timestamp = lastMessage ? lastMessage.timestamp : Date.now() / 1000;
+    
+    const checkpoint = {
+      isCheckpoint: true,
+      timestamp: timestamp,
+      label: `Checkpoint ${isolatedMessagesRef.current.filter(m => m.isCheckpoint).length + 1}`
+    };
+    isolatedMessagesRef.current.push(checkpoint);
+    setIsolatedMessages([...isolatedMessagesRef.current]);
+  };
+
+  const clearAllIsolations = () => {
+    setIsolatedIds(new Set());
+    isolatedMessagesRef.current = [];
+    setIsolatedMessages([]);
+    setIsolationPanelOpen(false);
+  };
+
+  const exportIsolatedMessagesCSV = () => {
+    // Filter out checkpoints - only export actual messages
+    let messagesToExport = isolatedMessages.filter(msg => !msg.isCheckpoint);
+    
+    // Apply duplicate filtering if hideDuplicates is enabled (same logic as display)
+    if (hideDuplicates) {
+      messagesToExport = messagesToExport.filter((msg, index, arr) => {
+        // Find previous message with the SAME CAN ID
+        let prevMsgSameId = null;
+        for (let i = index - 1; i >= 0; i--) {
+          if (arr[i].id === msg.id) {
+            prevMsgSameId = arr[i];
+            break;
+          }
+        }
+        
+        if (!prevMsgSameId) return true; // No previous message with same ID, keep it
+        
+        const changedBytes = getChangedBytes(msg.data, prevMsgSameId.data);
+        const changedSignals = getChangedSignals(
+          msg.decoded?.signals, 
+          prevMsgSameId.decoded?.signals
+        );
+        const hasChanges = changedBytes.size > 0 || changedSignals.size > 0;
+        const deltaTimeSameId = (msg.timestamp - prevMsgSameId.timestamp) * 1000;
+        
+        // Keep if it has changes OR time delta is >= threshold
+        return hasChanges || deltaTimeSameId >= DUPLICATE_TIME_THRESHOLD_MS;
+      });
+    }
+    
+    if (messagesToExport.length === 0) {
+      alert('No messages to export');
+      return;
+    }
+    
+    // Build CSV header
+    const headers = ['Sequence', 'Timestamp', 'Delta (ms)', 'CAN ID', 'Extended', 'DLC', 'Raw Data (Hex)', 'Message Name'];
+    
+    // Collect all unique signal names across all messages for columns
+    const allSignalNames = new Set();
+    messagesToExport.forEach(msg => {
+      if (msg.decoded?.signals) {
+        Object.keys(msg.decoded.signals).forEach(name => allSignalNames.add(name));
+      }
+    });
+    const signalNames = Array.from(allSignalNames).sort();
+    signalNames.forEach(name => headers.push(name));
+    
+    // Build CSV rows
+    const rows = messagesToExport.map((msg, index) => {
+      // Calculate delta time from previous message (same logic as display)
+      const prevMsg = index > 0 ? messagesToExport[index - 1] : null;
+      const deltaTime = prevMsg ? (msg.timestamp - prevMsg.timestamp) * 1000 : 0; // in ms
+      
+      const row = [
+        index + 1, // Use sequential index, not original sequenceNum
+        formatIsolationTimestamp(msg.timestamp),
+        deltaTime.toFixed(3),
+        msg.is_extended 
+          ? `0x${msg.id.toString(16).padStart(8, '0').toUpperCase()}`
+          : `0x${msg.id.toString(16).padStart(3, '0').toUpperCase()}`,
+        msg.is_extended ? 'Yes' : 'No',
+        msg.data.length,
+        msg.data.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' '),
+        msg.decoded?.message_name || ''
+      ];
+      
+      // Add signal values
+      signalNames.forEach(name => {
+        if (msg.decoded?.signals && msg.decoded.signals[name] !== undefined) {
+          const sig = msg.decoded.signals[name];
+          // Handle both object format {value, unit} and simple value format
+          const value = typeof sig === 'object' ? sig.value : sig;
+          const unit = typeof sig === 'object' ? (sig.unit || '') : '';
+          row.push(unit ? `${value} ${unit}` : value);
+        } else {
+          row.push('');
+        }
+      });
+      
+      return row;
+    });
+    
+    // Escape CSV values
+    const escapeCSV = (val) => {
+      const str = String(val);
+      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+    
+    // Build CSV content
+    const csvContent = [
+      headers.map(escapeCSV).join(','),
+      ...rows.map(row => row.map(escapeCSV).join(','))
+    ].join('\n');
+    
+    // Create and trigger download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const ids = Array.from(isolatedIds).map(id => id.toString(16).toUpperCase()).join('_');
+    link.download = `can_isolated_${ids}_${timestamp}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const formatIsolationTimestamp = (timestamp) => {
+    const date = new Date(timestamp * 1000);
+    return date.toLocaleTimeString('en-US', { hour12: false }) + '.' + date.getMilliseconds().toString().padStart(3, '0');
+  };
+
+  // Helper to compare two messages and find changed bytes/signals
+  const getChangedBytes = (currentData, prevData) => {
+    if (!prevData) return new Set();
+    const changed = new Set();
+    for (let i = 0; i < currentData.length; i++) {
+      if (currentData[i] !== prevData[i]) {
+        changed.add(i);
+      }
+    }
+    return changed;
+  };
+
+  const getChangedSignals = (currentSignals, prevSignals) => {
+    if (!prevSignals || !currentSignals) return new Set();
+    const changed = new Set();
+    for (const [key, value] of Object.entries(currentSignals)) {
+      const currentVal = typeof value === 'object' ? value.value : value;
+      const prevVal = prevSignals[key];
+      const prevValNum = typeof prevVal === 'object' ? prevVal?.value : prevVal;
+      if (currentVal !== prevValNum) {
+        changed.add(key);
+      }
+    }
+    return changed;
+  };
+
+  // Group isolated messages by ID for the full-screen view
+  const groupedIsolatedMessages = useMemo(() => {
+    const groups = new Map();
+    isolatedMessages.forEach(msg => {
+      if (!groups.has(msg.id)) {
+        groups.set(msg.id, []);
+      }
+      groups.get(msg.id).push(msg);
+    });
+    return groups;
+  }, [isolatedMessages]);
 
   const handleConnectClick = async () => {
     console.log('[CANExplorer] Connect button clicked:', { connected, deviceType, channel, baudrate });
@@ -324,18 +645,6 @@ function CANExplorer({
                 onClick={() => onTabChange('bms-status')}
               >
                 Status Dashboard
-              </button>
-              <button
-                className={`sidebar-tab submenu ${activeTab === 'thermistor' ? 'active' : ''}`}
-                onClick={() => onTabChange('thermistor')}
-              >
-                Thermistors
-              </button>
-              <button
-                className={`sidebar-tab submenu ${activeTab === 'voltage' ? 'active' : ''}`}
-                onClick={() => onTabChange('voltage')}
-              >
-                Cell Voltages
               </button>
               <button
                 className={`sidebar-tab submenu ${activeTab === 'module-config' ? 'active' : ''}`}
@@ -573,6 +882,19 @@ function CANExplorer({
                 </div>
                 {expandedReceivedMessages && (
                   <div className="header-buttons">
+                    <div className="sort-dropdown" onClick={(e) => e.stopPropagation()}>
+                      <label>Sort:</label>
+                      <select 
+                        value={sortOption} 
+                        onChange={(e) => setSortOption(e.target.value)}
+                        className="sort-select"
+                      >
+                        <option value="id-asc">ID (Ascending)</option>
+                        <option value="id-desc">ID (Descending)</option>
+                        <option value="name-asc">Name (A-Z)</option>
+                        <option value="name-desc">Name (Z-A)</option>
+                      </select>
+                    </div>
                     <button 
                       className="btn btn-secondary btn-sm" 
                       onClick={(e) => { e.stopPropagation(); handleDownloadCSV(); }}
@@ -623,8 +945,9 @@ function CANExplorer({
                       return (
                         <React.Fragment key={rowKey}>
                           <tr 
-                            className={`message-row ${hasSignals ? 'clickable' : ''}`}
+                            className={`message-row ${hasSignals ? 'clickable' : ''} ${isolatedIds.has(msg.id) ? 'isolated' : ''}`}
                             onClick={() => hasSignals && toggleRowExpansion(rowKey)}
+                            onContextMenu={(e) => handleContextMenu(e, msg)}
                           >
                             <td>
                               {hasSignals && (
@@ -740,6 +1063,338 @@ function CANExplorer({
           </>
         )}
       </div>
+
+      {/* Context Menu for Message Isolation */}
+      {contextMenu.show && (
+        <div 
+          className="context-menu"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+        >
+          {!isolatedIds.has(contextMenu.message?.id) ? (
+            <button 
+              className="context-menu-item"
+              onClick={() => addIsolatedId(contextMenu.message?.id)}
+            >
+              <Eye size={14} />
+              <span>Isolate ID: 0x{contextMenu.message?.id.toString(16).toUpperCase()}</span>
+            </button>
+          ) : (
+            <button 
+              className="context-menu-item"
+              onClick={() => removeIsolatedId(contextMenu.message?.id)}
+            >
+              <EyeOff size={14} />
+              <span>Stop Isolating 0x{contextMenu.message?.id.toString(16).toUpperCase()}</span>
+            </button>
+          )}
+          {isolatedIds.size > 0 && (
+            <button 
+              className="context-menu-item"
+              onClick={() => setIsolationPanelOpen(true)}
+            >
+              <List size={14} />
+              <span>Open Isolation View</span>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Full-Screen Message Isolation View */}
+      {isolationPanelOpen && (
+        <div className="isolation-fullscreen">
+          <div className="isolation-fullscreen-header">
+            <div className="isolation-header-left">
+              <Eye size={22} />
+              <h2>Message Isolation View</h2>
+              <span className="isolation-count">{isolatedMessages.length} messages captured</span>
+            </div>
+            <div className="isolation-header-right">
+              {/* Isolated IDs Tags */}
+              <div className="isolation-tags-inline">
+                {Array.from(isolatedIds).map(id => {
+                  const msg = messages.find(m => m.id === id);
+                  const name = msg?.decoded?.message_name;
+                  return (
+                    <div key={id} className="isolation-tag">
+                      <span className="isolation-tag-id">0x{id.toString(16).toUpperCase()}</span>
+                      {name && <span className="isolation-tag-name">{name}</span>}
+                      <button 
+                        className="isolation-tag-remove"
+                        onClick={() => removeIsolatedId(id)}
+                        title="Stop isolating this ID"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="isolation-header-actions">
+                <label className="isolation-autoscroll-toggle" title="Auto-scroll to latest message">
+                  <input
+                    type="checkbox"
+                    checked={autoScroll}
+                    onChange={(e) => setAutoScroll(e.target.checked)}
+                  />
+                  <span>Auto-scroll</span>
+                </label>
+                <label className="isolation-autoscroll-toggle" title="Hide duplicate messages (same data within 1ms)">
+                  <input
+                    type="checkbox"
+                    checked={hideDuplicates}
+                    onChange={(e) => setHideDuplicates(e.target.checked)}
+                  />
+                  <span>Hide duplicates</span>
+                </label>
+                <button 
+                  className="btn btn-checkpoint btn-sm"
+                  onClick={addCheckpoint}
+                  title="Add a visual checkpoint marker"
+                >
+                  <Flag size={14} />
+                  Checkpoint
+                </button>
+                <button 
+                  className="btn btn-export btn-sm"
+                  onClick={exportIsolatedMessagesCSV}
+                  title="Export messages to CSV file"
+                  disabled={isolatedMessages.filter(m => !m.isCheckpoint).length === 0}
+                >
+                  <Download size={14} />
+                  Export CSV
+                </button>
+                <button 
+                  className="btn btn-secondary btn-sm"
+                  onClick={clearIsolatedMessages}
+                  title="Clear captured messages"
+                >
+                  <Trash2 size={14} />
+                  Clear Messages
+                </button>
+                <button 
+                  className="btn btn-danger btn-sm"
+                  onClick={clearAllIsolations}
+                  title="Stop all isolations and close"
+                >
+                  <X size={14} />
+                  Clear All
+                </button>
+                <button 
+                  className="btn btn-primary btn-sm"
+                  onClick={() => setIsolationPanelOpen(false)}
+                  title="Return to CAN Explorer"
+                >
+                  <ChevronLeft size={14} />
+                  Back
+                </button>
+              </div>
+            </div>
+          </div>
+          
+          <div className="isolation-fullscreen-content" ref={isolationContentRef}>
+            {isolatedMessages.length === 0 ? (
+              <div className="isolation-empty-state">
+                <Eye size={48} />
+                <h3>{isolatedIds.size === 0 ? 'No IDs Selected' : 'Waiting for Messages...'}</h3>
+                <p>
+                  {isolatedIds.size === 0 
+                    ? 'Right-click on a message in the CAN Explorer to isolate its ID'
+                    : 'Messages for the selected IDs will appear here in sequential order'}
+                </p>
+              </div>
+            ) : (
+              <div className="isolation-messages-list">
+                {(() => {
+                  let displayIndex = 0;
+                  return isolatedMessages.map((msg, index) => {
+                  // Handle checkpoint markers
+                  if (msg.isCheckpoint) {
+                    return (
+                      <div key={`checkpoint-${index}`} className="isolation-checkpoint">
+                        <div className="isolation-checkpoint-line"></div>
+                        <div className="isolation-checkpoint-label">
+                          <Flag size={12} />
+                          <span>{msg.label}</span>
+                          <span className="isolation-checkpoint-time">
+                            {formatIsolationTimestamp(msg.timestamp)}
+                          </span>
+                        </div>
+                        <div className="isolation-checkpoint-line"></div>
+                      </div>
+                    );
+                  }
+                  
+                  // Find previous non-checkpoint message (any ID) for delta time calculation
+                  let prevMsg = null;
+                  for (let i = index - 1; i >= 0; i--) {
+                    if (!isolatedMessages[i].isCheckpoint) {
+                      prevMsg = isolatedMessages[i];
+                      break;
+                    }
+                  }
+                  
+                  // Find previous non-checkpoint message with the SAME CAN ID for change/duplicate detection
+                  let prevMsgSameId = null;
+                  for (let i = index - 1; i >= 0; i--) {
+                    if (!isolatedMessages[i].isCheckpoint && isolatedMessages[i].id === msg.id) {
+                      prevMsgSameId = isolatedMessages[i];
+                      break;
+                    }
+                  }
+                  
+                  const changedBytes = getChangedBytes(msg.data, prevMsgSameId?.data);
+                  const changedSignals = getChangedSignals(
+                    msg.decoded?.signals, 
+                    prevMsgSameId?.decoded?.signals
+                  );
+                  const hasChanges = changedBytes.size > 0 || changedSignals.size > 0;
+                  
+                  // Calculate delta time from previous message with SAME ID for duplicate detection
+                  const deltaTimeSameId = prevMsgSameId ? (msg.timestamp - prevMsgSameId.timestamp) * 1000 : null;
+                  
+                  // Calculate delta time from previous message (any ID) for display
+                  const deltaTime = prevMsg ? (msg.timestamp - prevMsg.timestamp) * 1000 : null; // in ms
+                  const deltaTimeStr = deltaTime !== null 
+                    ? deltaTime < 1 
+                      ? `+${(deltaTime * 1000).toFixed(0)}µs`
+                      : deltaTime < 1000 
+                        ? `+${deltaTime.toFixed(2)}ms`
+                        : `+${(deltaTime / 1000).toFixed(3)}s`
+                    : '';
+                  
+                  // Check if this is a duplicate (same ID, same data, tiny time delta between same-ID messages)
+                  const isDuplicate = prevMsgSameId && 
+                    !hasChanges && 
+                    deltaTimeSameId !== null && 
+                    deltaTimeSameId < DUPLICATE_TIME_THRESHOLD_MS;
+                  
+                  // Skip rendering if hideDuplicates is enabled and this is a duplicate
+                  if (hideDuplicates && isDuplicate) {
+                    return null;
+                  }
+                  
+                  // Increment display index for non-duplicate messages
+                  displayIndex++;
+                  
+                  return (
+                    <div 
+                      key={`${msg.id}-${msg.sequenceNum}-${index}`} 
+                      className={`isolation-message-card ${hasChanges ? 'has-changes' : ''}`}
+                    >
+                      <div className="isolation-card-header">
+                        <div className="isolation-card-meta">
+                          <span className="isolation-seq">#{displayIndex}</span>
+                          <span className="isolation-id">
+                            {msg.is_extended 
+                              ? `0x${msg.id.toString(16).padStart(8, '0').toUpperCase()}` 
+                              : `0x${msg.id.toString(16).padStart(3, '0').toUpperCase()}`}
+                          </span>
+                          {msg.decoded?.message_name && (
+                            <span className="isolation-name">{msg.decoded.message_name}</span>
+                          )}
+                        </div>
+                        <div className="isolation-time-group">
+                          {deltaTimeStr && <span className="isolation-delta">{deltaTimeStr}</span>}
+                          <span className="isolation-time">{formatIsolationTimestamp(msg.timestamp)}</span>
+                        </div>
+                      </div>
+                      
+                      <div className="isolation-card-body">
+                        {/* Raw Data Section */}
+                        <div className="isolation-section">
+                          <div className="isolation-section-header">
+                            <span>Raw Data</span>
+                            <span className="isolation-dlc">DLC: {msg.dlc || msg.data.length}</span>
+                          </div>
+                          <div className="isolation-raw-data">
+                            {msg.data.map((byte, byteIndex) => (
+                              <span 
+                                key={byteIndex} 
+                                className={`isolation-byte ${changedBytes.has(byteIndex) ? 'changed' : ''}`}
+                                title={`Byte ${byteIndex}: ${byte} (0x${byte.toString(16).padStart(2, '0').toUpperCase()})`}
+                              >
+                                {byte.toString(16).padStart(2, '0').toUpperCase()}
+                              </span>
+                            ))}
+                          </div>
+                          {/* Binary representation */}
+                          <div className="isolation-binary-row">
+                            {msg.data.map((byte, byteIndex) => (
+                              <span 
+                                key={byteIndex} 
+                                className={`isolation-binary ${changedBytes.has(byteIndex) ? 'changed' : ''}`}
+                              >
+                                {byte.toString(2).padStart(8, '0')}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        
+                        {/* Decoded Signals Section */}
+                        {msg.decoded?.signals && Object.keys(msg.decoded.signals).length > 0 && (
+                          <div className="isolation-section">
+                            <div className="isolation-section-header">
+                              <span>Decoded Signals</span>
+                              <span className="isolation-signal-count">
+                                {Object.keys(msg.decoded.signals).length} signals
+                              </span>
+                            </div>
+                            <div className="isolation-signals-grid">
+                              {Object.entries(msg.decoded.signals).map(([signalName, signalData]) => {
+                                const isObject = typeof signalData === 'object' && signalData !== null;
+                                const value = isObject ? signalData.value : signalData;
+                                const unit = isObject ? signalData.unit : null;
+                                const raw = isObject ? signalData.raw : null;
+                                const isChanged = changedSignals.has(signalName);
+                                
+                                let displayValue;
+                                if (typeof value === 'number') {
+                                  displayValue = Number.isInteger(value) ? value : value.toFixed(3);
+                                } else {
+                                  displayValue = value;
+                                }
+                                
+                                return (
+                                  <div 
+                                    key={signalName} 
+                                    className={`isolation-signal ${isChanged ? 'changed' : ''}`}
+                                  >
+                                    <span className="isolation-signal-name">{signalName}</span>
+                                    <span className="isolation-signal-value">
+                                      {displayValue}
+                                      {unit && <span className="isolation-signal-unit">{unit}</span>}
+                                      {typeof value === 'string' && raw !== null && raw !== undefined && (
+                                        <span className="isolation-signal-raw">({raw})</span>
+                                      )}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                });
+                })()}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      
+      {/* Floating button to open isolation view when closed */}
+      {!isolationPanelOpen && isolatedIds.size > 0 && (
+        <button 
+          className="isolation-floating-btn"
+          onClick={() => setIsolationPanelOpen(true)}
+          title={`${isolatedIds.size} isolated ID(s) - Click to open view`}
+        >
+          <Eye size={18} />
+          <span className="isolation-badge">{isolatedIds.size}</span>
+        </button>
+      )}
     </div>
   );
 }

@@ -616,7 +616,18 @@ class CANBackend:
                 if server_decoded.get('signals'):
                     for sig in server_decoded['signals']:
                         if isinstance(sig, dict):
-                            signals[sig.get('name', 'unknown')] = sig.get('value', 0)
+                            sig_name = sig.get('name', 'unknown')
+                            # Preserve full signal info including value, unit, and any other metadata
+                            signal_info = {
+                                'value': sig.get('value', 0)
+                            }
+                            # Add unit if present
+                            if sig.get('unit'):
+                                signal_info['unit'] = sig['unit']
+                            # Add raw value if present (for enum values)
+                            if 'raw' in sig:
+                                signal_info['raw'] = sig['raw']
+                            signals[sig_name] = signal_info
                 
                 message_data['decoded'] = {
                     'message_name': server_decoded.get('message_name'),

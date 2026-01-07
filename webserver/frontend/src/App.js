@@ -3,8 +3,6 @@ import './App.css';
 import Header from './components/Header';
 import ConnectionPanel from './components/ConnectionPanel';
 import CANExplorer from './components/CANExplorer';
-import ThermistorMonitor from './components/ThermistorMonitor';
-import CellVoltageMonitor from './components/CellVoltageMonitor';
 import ModuleConfig from './components/ModuleConfig';
 import BMSOverview from './components/BMSOverview';
 import BMSStatus from './components/BMSStatus';
@@ -291,6 +289,7 @@ function App() {
             stats={stats}
             activeTab={activeTab}
             onTabChange={setActiveTab}
+            onRegisterRawCallback={registerRawMessageCallback}
           />
         )}
         {activeTab === 'bms-status' && (
@@ -310,6 +309,7 @@ function App() {
             stats={stats}
             activeTab={activeTab}
             onTabChange={setActiveTab}
+            onRegisterRawCallback={registerRawMessageCallback}
           >
             <BMSStatus 
               messages={messages} 
@@ -335,50 +335,9 @@ function App() {
             stats={stats}
             activeTab={activeTab}
             onTabChange={setActiveTab}
+            onRegisterRawCallback={registerRawMessageCallback}
           >
             <BMSOverview messages={messages} />
-          </CANExplorer>
-        )}
-        {activeTab === 'thermistor' && (
-          <CANExplorer
-            connected={connected}
-            messages={messages}
-            onClearMessages={handleClearMessages}
-            onSendMessage={handleSendMessage}
-            onLoadDBC={handleLoadDBC}
-            dbcLoaded={dbcLoaded}
-            dbcFile={dbcFile}
-            devices={devices}
-            onConnect={handleConnect}
-            onDisconnect={handleDisconnect}
-            onRefreshDevices={fetchDevices}
-            connectionStatus={connectionStatus}
-            stats={stats}
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-          >
-            <ThermistorMonitor messages={messages} />
-          </CANExplorer>
-        )}
-        {activeTab === 'voltage' && (
-          <CANExplorer
-            connected={connected}
-            messages={messages}
-            onClearMessages={handleClearMessages}
-            onSendMessage={handleSendMessage}
-            onLoadDBC={handleLoadDBC}
-            dbcLoaded={dbcLoaded}
-            dbcFile={dbcFile}
-            devices={devices}
-            onConnect={handleConnect}
-            onDisconnect={handleDisconnect}
-            onRefreshDevices={fetchDevices}
-            connectionStatus={connectionStatus}
-            stats={stats}
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-          >
-            <CellVoltageMonitor messages={messages} />
           </CANExplorer>
         )}
         {activeTab === 'module-config' && (
@@ -398,6 +357,7 @@ function App() {
             stats={stats}
             activeTab={activeTab}
             onTabChange={setActiveTab}
+            onRegisterRawCallback={registerRawMessageCallback}
           >
             <ModuleConfig 
               messages={messages} 

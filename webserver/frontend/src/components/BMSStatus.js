@@ -4,8 +4,8 @@ import { apiService } from '../services/api';
 import FirmwareFlasher from './FirmwareFlasher';
 import './BMSStatus.css';
 
-// Helper function to extract signal value - handles both local DBC decoding (object with .value/.raw)
-// and server-side decoding (raw value directly)
+// Helper function to extract numeric signal value - handles both local DBC decoding (object with .value/.raw)
+// and server-side decoding (raw value directly). Prefers raw numeric value for calculations.
 const getSignalValue = (signal, defaultValue = 0) => {
   if (signal === undefined || signal === null) return defaultValue;
   if (typeof signal === 'number') return signal;
@@ -13,6 +13,23 @@ const getSignalValue = (signal, defaultValue = 0) => {
     return signal.raw ?? signal.value ?? defaultValue;
   }
   return defaultValue;
+};
+
+// Helper function to extract string signal value (e.g., enum names like 'NORMAL', 'FAULT')
+// Prefers the display value over raw numeric value
+const getSignalDisplayValue = (signal, defaultValue = '') => {
+  if (signal === undefined || signal === null) return defaultValue;
+  if (typeof signal === 'string') return signal;
+  if (typeof signal === 'number') return String(signal);
+  if (typeof signal === 'object') {
+    // For enums, value is the string name, raw is the number
+    // Prefer value (string) over raw (number) for display purposes
+    if (typeof signal.value === 'string') return signal.value;
+    if (signal.value !== undefined) return String(signal.value);
+    if (signal.raw !== undefined) return String(signal.raw);
+    return defaultValue;
+  }
+  return String(signal);
 };
 
 const getSignalUnit = (signal, defaultUnit = '') => {
@@ -216,16 +233,22 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
       
       const msgName = msg.decoded.message_name;
       
-      // Track Chip Reset ACKs
+      // Track Chip Reset ACKs (via DBC decoding)
       if (msgName.startsWith('BMS_Chip_Reset_ACK_')) {
         const moduleMatch = msgName.match(/_(\d)$/);
         if (moduleMatch) {
           const modId = parseInt(moduleMatch[1]);
-          const status = getSignalValue(msg.decoded.signals.Status, 'Unknown');
+          const status = getSignalDisplayValue(msg.decoded.signals.Status, 'Unknown');
           setCommandStatus(prev => ({
             ...prev,
             [`chip_reset_${modId}`]: {
               status: status === 'Success' ? 'success' : 'error',
+              message: `Status: ${status}`,
+              timestamp: Date.now()
+            },
+            // Also update bq_reset status since it's the same ACK
+            [`bq_reset_${modId}`]: {
+              status: status === 'Success' || status === 'Queued' ? 'success' : 'error',
               message: `Status: ${status}`,
               timestamp: Date.now()
             }
@@ -247,6 +270,29 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
               data: msg.decoded.signals
             }
           }));
+        }
+      }
+    });
+
+    // Also check for BQ Reset ACK by raw CAN ID (0x08F0XF04) in case DBC isn't loaded
+    recentMessages.forEach(msg => {
+      // BQ Reset ACK CAN ID: 0x08F00F04 | (moduleId << 12)
+      const baseAckId = 0x08F00F04;
+      for (let modId = 0; modId < 6; modId++) {
+        const expectedAckId = baseAckId | (modId << 12);
+        if (msg.id === expectedAckId) {
+          // Byte 0 is status: 0x00 = Queued, 0x01 = Fail/Already Pending
+          const statusByte = msg.data[0];
+          const status = statusByte === 0 ? 'Queued' : 'Fail';
+          setCommandStatus(prev => ({
+            ...prev,
+            [`bq_reset_${modId}`]: {
+              status: statusByte === 0 ? 'success' : 'error',
+              message: `BQ Reset ${status}`,
+              timestamp: Date.now()
+            }
+          }));
+          break;
         }
       }
     });
@@ -353,6 +399,63 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
       ...prev,
       [`chip_reset_${moduleId}`]: { status: 'pending', message: 'Waiting for ACK...', timestamp: Date.now() }
     }));
+  };
+
+  // Direct CAN ID based reset commands (don't require DBC encoding)
+  // STM32 Reset: 0x08F0XF02 where X = module ID
+  const handleSTMResetDirect = async (moduleId) => {
+    const canId = 0x08F00F02 | (moduleId << 12);
+    try {
+      const success = await onSendMessage(canId, [0, 0, 0, 0, 0, 0, 0, 0], true, false);
+      if (success) {
+        setCommandStatus(prev => ({
+          ...prev,
+          [`stm_reset_${moduleId}`]: { 
+            status: 'success', 
+            message: 'STM32 reset sent (device resets immediately)', 
+            timestamp: Date.now() 
+          }
+        }));
+      }
+    } catch (error) {
+      console.error(`Failed to send STM32 reset to module ${moduleId}:`, error);
+      setCommandStatus(prev => ({
+        ...prev,
+        [`stm_reset_${moduleId}`]: { 
+          status: 'error', 
+          message: `Failed: ${error.message}`, 
+          timestamp: Date.now() 
+        }
+      }));
+    }
+  };
+
+  // BQ76952 Chip Reset: 0x08F0XF03 where X = module ID, ACK on 0x08F0XF04
+  const handleBQResetDirect = async (moduleId) => {
+    const canId = 0x08F00F03 | (moduleId << 12);
+    try {
+      const success = await onSendMessage(canId, [0, 0, 0, 0, 0, 0, 0, 0], true, false);
+      if (success) {
+        setCommandStatus(prev => ({
+          ...prev,
+          [`bq_reset_${moduleId}`]: { 
+            status: 'pending', 
+            message: 'Waiting for ACK...', 
+            timestamp: Date.now() 
+          }
+        }));
+      }
+    } catch (error) {
+      console.error(`Failed to send BQ reset to module ${moduleId}:`, error);
+      setCommandStatus(prev => ({
+        ...prev,
+        [`bq_reset_${moduleId}`]: { 
+          status: 'error', 
+          message: `Failed: ${error.message}`, 
+          timestamp: Date.now() 
+        }
+      }));
+    }
   };
 
   const handleDebugRequest = async () => {
@@ -462,8 +565,8 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
                 </div>
                 <div className="card-content">
                   {heartbeat.BMS_State && (
-                    <div className={`bms-state ${getBMSStateClass(getSignalValue(heartbeat.BMS_State, 'UNKNOWN'))}`}>
-                      {getSignalValue(heartbeat.BMS_State, 'UNKNOWN')}
+                    <div className={`bms-state ${getBMSStateClass(getSignalDisplayValue(heartbeat.BMS_State, 'UNKNOWN'))}`}>
+                      {getSignalDisplayValue(heartbeat.BMS_State, 'UNKNOWN')}
                     </div>
                   )}
                   {heartbeat.Fault_Count !== undefined && (
@@ -715,7 +818,7 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
               <div className="modules-grid">
                 {[0, 1, 2, 3, 4, 5].map(moduleId => {
                   const modData = moduleData[moduleId];
-                  const modState = getSignalValue(modData?.heartbeat?.BMS_State, 'OFFLINE');
+                  const modState = getSignalDisplayValue(modData?.heartbeat?.BMS_State, 'OFFLINE');
                   const modFaultCount = getSignalValue(modData?.heartbeat?.Fault_Count);
                   const hasFault = modFaultCount > 0 || modState === 'FAULT';
                   const modErrorFlags = getErrorFlags(moduleId);
@@ -859,6 +962,36 @@ function BMSStatus({ messages, onSendMessage, dbcFile }) {
                                 </div>
                               </div>
                             )}
+
+                            {/* Reset Buttons Section */}
+                            <div className="module-section reset-section">
+                              <div className="reset-buttons">
+                                <button 
+                                  className="btn-reset btn-stm-reset"
+                                  onClick={() => handleSTMResetDirect(moduleId)}
+                                  title="Reset STM32 microcontroller"
+                                >
+                                  STM Reset
+                                </button>
+                                <button 
+                                  className="btn-reset btn-bq-reset"
+                                  onClick={() => handleBQResetDirect(moduleId)}
+                                  title="Reset BQ76952 battery management chips"
+                                >
+                                  BQ Reset
+                                </button>
+                              </div>
+                              {commandStatus[`stm_reset_${moduleId}`] && (
+                                <div className={`reset-status ${commandStatus[`stm_reset_${moduleId}`].status}`}>
+                                  {commandStatus[`stm_reset_${moduleId}`].message}
+                                </div>
+                              )}
+                              {commandStatus[`bq_reset_${moduleId}`] && (
+                                <div className={`reset-status ${commandStatus[`bq_reset_${moduleId}`].status}`}>
+                                  {commandStatus[`bq_reset_${moduleId}`].message}
+                                </div>
+                              )}
+                            </div>
                           </>
                         )}
                       </div>

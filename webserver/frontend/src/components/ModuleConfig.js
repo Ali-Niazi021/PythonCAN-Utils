@@ -29,10 +29,10 @@ function ModuleConfig({ messages, onSendMessage, connected, onRegisterRawCallbac
   const [inputValues, setInputValues] = useState({});
   // Last ACK status per module
   const [ackStatus, setAckStatus] = useState({});
-  // Which modules to show (detected or manually added)
-  const [activeModules, setActiveModules] = useState([0]); // Start with module 0
-  // New module ID input
-  const [newModuleId, setNewModuleId] = useState('');
+  // All 6 modules are always shown
+  const activeModules = [0, 1, 2, 3, 4, 5];
+  // Track which modules have responded (have any config data)
+  const [respondingModules, setRespondingModules] = useState(new Set());
   // Loading state per module
   const [loadingModules, setLoadingModules] = useState({});
   // Global refresh in progress
@@ -43,14 +43,25 @@ function ModuleConfig({ messages, onSendMessage, connected, onRegisterRawCallbac
   // Store active modules in ref for callback access
   const activeModulesRef = useRef(activeModules);
   
-  // Keep ref in sync with state
-  useEffect(() => {
-    activeModulesRef.current = activeModules;
-  }, [activeModules]);
-
   // Calculate CAN ID for a module
   const getConfigCmdId = useCallback((moduleId) => CONFIG_CMD_BASE | (moduleId << 12), []);
   const getConfigAckId = useCallback((moduleId) => CONFIG_ACK_BASE | (moduleId << 12), []);
+
+  // Helper function to extract signal value from different formats
+  // Network driver returns: { signal_name: value }
+  // PCAN/CANable local decoding returns: { signal_name: { value: ..., raw: ... } }
+  const getSignalValue = useCallback((signals, signalName) => {
+    const signal = signals[signalName];
+    if (signal === undefined || signal === null) return undefined;
+    
+    // If it's an object with a 'value' property (local DBC decoding format)
+    if (typeof signal === 'object' && signal !== null && 'value' in signal) {
+      return signal.value;
+    }
+    
+    // Otherwise it's a direct value (network driver format)
+    return signal;
+  }, []);
 
   // Process a single raw message (called for EVERY message, not aggregated)
   const processRawMessage = useCallback((msg) => {
@@ -76,20 +87,25 @@ function ModuleConfig({ messages, onSendMessage, connected, onRegisterRawCallbac
         processedTimestampsRef.current = new Set(arr.slice(-500));
       }
       
-      // Extract data from decoded signals (server-side DBC decoding)
+      // Extract data from decoded signals
+      // Supports both network driver (server-side) and PCAN/CANable (local) DBC decoding
       const signals = msg.decoded?.signals;
       if (!signals) {
         console.log(`[ModuleConfig] Message matched but no decoded signals`);
         continue;
       }
       
-      const cmdEcho = signals.Command_Echo;
-      const status = signals.Status;
-      const param = signals.Byte2_OldVal_or_Param;
-      const valueLow = signals.Byte3_NewVal_or_ValLo;
-      const valueHigh = signals.Byte4_ValHi || 0;
+      // Use helper to extract values from either signal format
+      const cmdEcho = getSignalValue(signals, 'Command_Echo');
+      const status = getSignalValue(signals, 'Status');
+      const param = getSignalValue(signals, 'Byte2_OldVal_or_Param');
+      const valueLow = getSignalValue(signals, 'Byte3_NewVal_or_ValLo');
+      const valueHigh = getSignalValue(signals, 'Byte4_ValHi') || 0;
       
       console.log(`[ModuleConfig] ✓ MATCHED ACK for module ${moduleId}: cmd=${cmdEcho}, status=${status}, param=${param}, value=${valueLow}`);
+      
+      // Mark this module as responding
+      setRespondingModules(prev => new Set([...prev, moduleId]));
       
       if (cmdEcho === 'GET_VALUE') {
         // GET response - update module config based on parameter
@@ -172,7 +188,7 @@ function ModuleConfig({ messages, onSendMessage, connected, onRegisterRawCallbac
       
       break; // Found matching module, stop checking others
     }
-  }, []);
+  }, [getSignalValue]);
 
   // Register for raw messages when component mounts
   useEffect(() => {
@@ -202,25 +218,22 @@ function ModuleConfig({ messages, onSendMessage, connected, onRegisterRawCallbac
       const param = params[i];
       console.log(`[ModuleConfig] Sending GET for ${paramNames[i]} (param ${param})`);
       await onSendMessage(canId, [CMD_GET_VALUE, param, 0, 0, 0, 0, 0, 0], true, false);
-      // 500ms delay between requests to ensure we receive and process each response
+      // 500ms delay between parameter requests to ensure we receive and process each response
       await new Promise(resolve => setTimeout(resolve, 500));
     }
     
     setLoadingModules(prev => ({ ...prev, [moduleId]: false }));
   }, [connected, onSendMessage, getConfigCmdId]);
 
-  // Refresh all modules sequentially (not in parallel) to avoid message collisions
+  // Refresh all modules in parallel (each module's parameters are still sequential with delays)
   const refreshAllModules = useCallback(async () => {
     if (!connected || !onSendMessage || isRefreshingAll) return;
     
     setIsRefreshingAll(true);
-    console.log(`[ModuleConfig] Refreshing all ${activeModules.length} modules sequentially`);
+    console.log(`[ModuleConfig] Refreshing all ${activeModules.length} modules in parallel`);
     
-    for (const moduleId of activeModules) {
-      await refreshModule(moduleId);
-      // Extra delay between modules
-      await new Promise(resolve => setTimeout(resolve, 300));
-    }
+    // Start all module refreshes in parallel
+    await Promise.all(activeModules.map(moduleId => refreshModule(moduleId)));
     
     setIsRefreshingAll(false);
   }, [connected, onSendMessage, activeModules, refreshModule, isRefreshingAll]);
@@ -266,32 +279,6 @@ function ModuleConfig({ messages, onSendMessage, connected, onRegisterRawCallbac
         [field]: value
       }
     }));
-  };
-
-  // Add a new module to track
-  const addModule = () => {
-    const id = parseInt(newModuleId);
-    if (!isNaN(id) && id >= 0 && id <= 15 && !activeModules.includes(id)) {
-      setActiveModules(prev => [...prev, id].sort((a, b) => a - b));
-      setNewModuleId('');
-      // Refresh the new module
-      setTimeout(() => refreshModule(id), 100);
-    }
-  };
-
-  // Remove a module from tracking
-  const removeModule = (moduleId) => {
-    setActiveModules(prev => prev.filter(id => id !== moduleId));
-    setModuleConfigs(prev => {
-      const updated = { ...prev };
-      delete updated[moduleId];
-      return updated;
-    });
-    setInputValues(prev => {
-      const updated = { ...prev };
-      delete updated[moduleId];
-      return updated;
-    });
   };
 
   // Get display value (input if modified, otherwise current config)
@@ -345,20 +332,6 @@ function ModuleConfig({ messages, onSendMessage, connected, onRegisterRawCallbac
           <RefreshCw size={14} className={isRefreshingAll ? 'spinning' : ''} />
           {isRefreshingAll ? 'Refreshing...' : 'Refresh All'}
         </button>
-        <div className="module-add">
-          <input
-            type="number"
-            min="0"
-            max="15"
-            placeholder="ID"
-            value={newModuleId}
-            onChange={(e) => setNewModuleId(e.target.value)}
-            className="module-id-input"
-          />
-          <button onClick={addModule} disabled={!connected} className="add-module-btn">
-            Add Module
-          </button>
-        </div>
       </div>
 
       {!connected && (
@@ -374,12 +347,14 @@ function ModuleConfig({ messages, onSendMessage, connected, onRegisterRawCallbac
           const ack = ackStatus[moduleId];
           const isLoading = loadingModules[moduleId];
           const canIdHex = `0x${getConfigCmdId(moduleId).toString(16).toUpperCase()}`;
+          const isResponding = respondingModules.has(moduleId);
           
           return (
-            <div key={moduleId} className="module-card">
+            <div key={moduleId} className={`module-card ${isResponding ? 'responding' : 'not-responding'}`}>
               <div className="module-card-header">
                 <h3>Module {moduleId}</h3>
                 <span className="can-id-badge">{canIdHex}</span>
+                {!isResponding && <span className="offline-badge">Offline</span>}
                 <div className="module-actions">
                   <button 
                     onClick={() => refreshModule(moduleId)} 
@@ -389,15 +364,6 @@ function ModuleConfig({ messages, onSendMessage, connected, onRegisterRawCallbac
                   >
                     <RefreshCw size={12} />
                   </button>
-                  {activeModules.length > 1 && (
-                    <button 
-                      onClick={() => removeModule(moduleId)}
-                      className="remove-btn"
-                      title="Remove module"
-                    >
-                      <X size={12} />
-                    </button>
-                  )}
                 </div>
               </div>
 

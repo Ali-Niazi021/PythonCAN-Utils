@@ -579,6 +579,77 @@
   color: #ef4444;
 }
 
+/* Reset buttons section in module cards */
+.modules-grid .reset-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #2a2a2a;
+}
+
+.modules-grid .reset-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.modules-grid .btn-reset {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-transform: uppercase;
+}
+
+.modules-grid .btn-stm-reset {
+  background: #1e3a5f;
+  color: #60a5fa;
+}
+
+.modules-grid .btn-stm-reset:hover {
+  background: #2563eb;
+  color: #fff;
+}
+
+.modules-grid .btn-bq-reset {
+  background: #3f2f1a;
+  color: #fbbf24;
+}
+
+.modules-grid .btn-bq-reset:hover {
+  background: #b45309;
+  color: #fff;
+}
+
+.modules-grid .btn-reset:active {
+  transform: scale(0.95);
+}
+
+.modules-grid .reset-status {
+  font-size: 9px;
+  padding: 4px 6px;
+  margin-top: 4px;
+  border-radius: 3px;
+  text-align: center;
+}
+
+.modules-grid .reset-status.success {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+}
+
+.modules-grid .reset-status.pending {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+}
+
+.modules-grid .reset-status.error {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
 /* Legacy module cards grid - keep for compatibility */
 .module-cards-grid {
   display: grid;
