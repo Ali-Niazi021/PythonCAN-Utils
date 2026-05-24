@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Activity, AlertTriangle, Thermometer, Zap, TrendingUp, TrendingDown, Info, Send, CheckCircle, XCircle, ChevronDown, ChevronRight } from 'lucide-react';
-import { useNowTick, isTimestampStale } from '../hooks/useStaleness';
+import { useNowTick, isTimestampStale, messageFreshnessTimestamp } from '../hooks/useStaleness';
 import { useIsMobile } from '../hooks/useIsMobile';
 import ErrorBoundary from './ErrorBoundary';
 import './BMSStatus.css';
@@ -152,7 +152,7 @@ function BMSStatus({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
     if (!messages || messages.length === 0) return timestamps;
 
     messages.forEach(msg => {
-      const t = typeof msg?.timestamp === 'number' ? msg.timestamp : null;
+      const t = messageFreshnessTimestamp(msg);
       if (t === null) return;
       const msgName = msg?.decoded?.message_name || '';
       const ids = new Set();

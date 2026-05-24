@@ -3,7 +3,7 @@ import {
   Activity, AlertTriangle, Battery, CheckCircle, Cpu, Gauge, Power,
   Settings, ShieldAlert, SlidersHorizontal, ToggleRight, Zap,
 } from 'lucide-react';
-import { useNowTick, isTimestampStale } from '../hooks/useStaleness';
+import { useNowTick, isTimestampStale, messageFreshnessTimestamp } from '../hooks/useStaleness';
 import './MoboDashboard.css';
 
 const MOBO_DBC_FILENAME = 'Baby_MOBO.dbc';
@@ -193,17 +193,18 @@ function MoboDashboard({
     messages.forEach((msg) => {
       if (!isMoboMessage(msg) || !msg.decoded?.signals) return;
       const timestamp = typeof msg.timestamp === 'number' ? msg.timestamp : 0;
+      const freshnessTimestamp = messageFreshnessTimestamp(msg);
       const name = msg.decoded.message_name;
 
       if (!frames[name] || timestamp >= frames[name].timestamp) {
-        frames[name] = { signals: msg.decoded.signals, timestamp };
+        frames[name] = { signals: msg.decoded.signals, timestamp, freshnessTimestamp };
       }
       if (latest === null || timestamp > latest) latest = timestamp;
 
       Object.entries(msg.decoded.signals).forEach(([signalName, signal]) => {
         const previous = sigMap.get(signalName);
         if (!previous || timestamp >= previous.timestamp) {
-          sigMap.set(signalName, { signal, timestamp, messageName: name });
+          sigMap.set(signalName, { signal, timestamp, freshnessTimestamp, messageName: name });
         }
       });
     });
@@ -231,7 +232,7 @@ function MoboDashboard({
 
   const renderFreshness = (frameName) => {
     const frame = getFrame(frameName);
-    return <Freshness timestamp={frame?.timestamp} nowMs={nowMs} staleTimeoutMs={staleTimeoutMs} />;
+    return <Freshness timestamp={frame?.freshnessTimestamp} nowMs={nowMs} staleTimeoutMs={staleTimeoutMs} />;
   };
 
   const sendFrame = async (canId, data, successText) => {
@@ -310,7 +311,7 @@ function MoboDashboard({
   const safety = getFrame('MOBO_Safety_Status');
   const canStats = getFrame('MOBO_CAN_Stats');
   const systemState = getEnumDisplay(getSignal('System_State'), SYSTEM_STATES);
-  const heartbeatIsStale = isTimestampStale(heartbeat?.timestamp, nowMs, staleTimeoutMs);
+  const heartbeatIsStale = isTimestampStale(heartbeat?.freshnessTimestamp, nowMs, staleTimeoutMs);
   const heartbeatStatus = !heartbeat ? 'Heartbeat missing' : heartbeatIsStale ? 'Heartbeat stale' : 'Heartbeat good';
   const heartbeatVariant = !heartbeat ? 'neutral' : heartbeatIsStale ? 'error' : 'success';
   const errorFlagsValue = getNumeric(errors?.signals?.Error_Flags) ?? getNumeric(getSignal('Error_Summary'));

@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import { Battery, Thermometer, TrendingUp, TrendingDown, Zap, Scale } from 'lucide-react';
-import { useNowTick, isTimestampStale } from '../hooks/useStaleness';
+import { useNowTick, isTimestampStale, messageFreshnessTimestamp } from '../hooks/useStaleness';
 import './BalanceManager.css';
 
 // CAN IDs for balance messages (29-bit extended)
@@ -17,7 +17,7 @@ function BalanceManager({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
     const timestamps = Array(6).fill(null);
     if (!messages) return timestamps;
     messages.forEach(msg => {
-      const t = typeof msg?.timestamp === 'number' ? msg.timestamp : null;
+      const t = messageFreshnessTimestamp(msg);
       if (t === null) return;
       const msgName = msg?.decoded?.message_name || '';
       const ids = new Set();

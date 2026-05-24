@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { Battery, Thermometer, TrendingUp, TrendingDown, Zap } from 'lucide-react';
-import { useNowTick, isTimestampStale } from '../hooks/useStaleness';
+import { useNowTick, isTimestampStale, messageFreshnessTimestamp } from '../hooks/useStaleness';
 import './BMSOverview.css';
 
 function BMSOverview({ messages, staleTimeoutMs = 30000 }) {
@@ -228,7 +228,7 @@ function BMSOverview({ messages, staleTimeoutMs = 30000 }) {
   const moduleFreshestTimestamp = useMemo(() => {
     const timestamps = Array(6).fill(null);
     messages.forEach(msg => {
-      const t = typeof msg?.timestamp === 'number' ? msg.timestamp : null;
+      const t = messageFreshnessTimestamp(msg);
       if (t === null) return;
       const msgName = msg?.decoded?.message_name || '';
 
@@ -270,7 +270,7 @@ function BMSOverview({ messages, staleTimeoutMs = 30000 }) {
     let latest = null;
     messages.forEach(msg => {
       if (msg?.decoded?.message_name !== 'Current_Sensor_Data') return;
-      const t = typeof msg?.timestamp === 'number' ? msg.timestamp : null;
+      const t = messageFreshnessTimestamp(msg);
       if (t !== null && (latest === null || t > latest)) latest = t;
     });
     return latest;

@@ -2055,12 +2055,14 @@ class CANBackend:
         the async broadcast on the main event loop.
         """
         self.message_count += 1
+        received_at = time.time()
         
         # Convert message to JSON-serializable format
         message_data = {
             'id': msg.id,
             'data': list(msg.data),
             'timestamp': msg.timestamp,
+            'received_at': received_at,
             'is_extended': msg.is_extended,
             'is_remote': msg.is_remote,
             'dlc': msg.dlc

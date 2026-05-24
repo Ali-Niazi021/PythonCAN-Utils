@@ -3,7 +3,7 @@ import {
   Zap, Activity, Power, Gauge, Thermometer, AlertTriangle,
   RotateCcw, RefreshCw, ShieldAlert, Play, Square,
 } from 'lucide-react';
-import { useNowTick, isTimestampStale } from '../hooks/useStaleness';
+import { useNowTick, isTimestampStale, messageFreshnessTimestamp } from '../hooks/useStaleness';
 import './InverterDashboard.css';
 
 const INVERTER_DBC_FILENAME = 'BMS-Inverter-Only.dbc';
@@ -198,14 +198,15 @@ function InverterDashboard({
     messages.forEach((msg) => {
       if (!isInverterMessage(msg) || !msg.decoded?.signals) return;
       const ts = typeof msg.timestamp === 'number' ? msg.timestamp : 0;
+      const freshnessTs = messageFreshnessTimestamp(msg);
       const name = msg.decoded.message_name;
       if (!frames[name] || ts >= frames[name].timestamp) {
-        frames[name] = { signals: msg.decoded.signals, timestamp: ts };
+        frames[name] = { signals: msg.decoded.signals, timestamp: ts, freshnessTimestamp: freshnessTs };
       }
       Object.entries(msg.decoded.signals).forEach(([sigName, signal]) => {
         const prev = sigMap.get(sigName);
         if (!prev || ts >= prev.timestamp) {
-          sigMap.set(sigName, { signal, timestamp: ts });
+          sigMap.set(sigName, { signal, timestamp: ts, freshnessTimestamp: freshnessTs });
         }
       });
     });
@@ -370,7 +371,7 @@ function InverterDashboard({
   };
 
   const renderFreshness = (frameName) => {
-    const ts = framesByName[frameName]?.timestamp;
+    const ts = framesByName[frameName]?.freshnessTimestamp;
     return (
       <span className={`freshness ${freshnessClass(ts, nowMs, staleTimeoutMs)}`}>
         {freshnessLabel(ts, nowMs)}
