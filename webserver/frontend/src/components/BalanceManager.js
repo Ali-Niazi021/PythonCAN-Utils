@@ -21,10 +21,10 @@ function BalanceManager({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
       if (t === null) return;
       const msgName = msg?.decoded?.message_name || '';
       const ids = new Set();
-      const tempMatch = msgName.match(/Cell_Temp_(\d+)_/);
-      if (tempMatch) ids.add(Math.floor(parseInt(tempMatch[1], 10) / 56));
-      const voltMatch = msgName.match(/Cell_Voltage_(\d+)_/);
-      if (voltMatch) ids.add(Math.floor((parseInt(voltMatch[1], 10) - 1) / 18));
+      const tempMatch = msgName.match(/^Temp_m(\d+)_/);
+      if (tempMatch) ids.add(parseInt(tempMatch[1], 10));
+      const voltMatch = msgName.match(/^CellVoltage_m(\d+)_/);
+      if (voltMatch) ids.add(parseInt(voltMatch[1], 10));
       const suffixMatch = msgName.match(/_(\d)$/);
       if (suffixMatch) ids.add(parseInt(suffixMatch[1], 10));
       ids.forEach(id => {
@@ -144,11 +144,11 @@ function BalanceManager({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
             ? signalData.value
             : signalData;
 
-          const cellMatch = key.match(/Cell_(\d+)_Voltage/);
+          // New DBC naming: CellVoltage_m<module>_cellgrp<group>
+          const cellMatch = key.match(/^CellVoltage_m(\d+)_cellgrp(\d+)$/);
           if (cellMatch) {
-            const cellNum = parseInt(cellMatch[1]) - 1;
-            const cellModuleId = Math.floor(cellNum / 18);
-            const cellIdx = cellNum % 18;
+            const cellModuleId = parseInt(cellMatch[1], 10);
+            const cellIdx = parseInt(cellMatch[2], 10) - 1;
             if (cellModuleId >= 0 && cellModuleId < 6 && cellIdx >= 0 && cellIdx < 18 && typeof value === 'number') {
               modules[cellModuleId][cellIdx] = value > 100 ? value / 1000 : value;
             }
@@ -187,20 +187,27 @@ function BalanceManager({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
         const signals = msg.decoded.signals;
 
         Object.entries(signals).forEach(([key, signalData]) => {
-          let tempNum = null;
-          const tempMatch = key.match(/^Temp_(\d+)$/);
-          if (tempMatch) {
-            tempNum = parseInt(tempMatch[1], 10);
+          let moduleId = null;
+          let channel = null;
+
+          const cellTempMatch = key.match(/^Temp_m(\d+)_cellgrp(\d+)_(\d+)$/);
+          if (cellTempMatch) {
+            moduleId = parseInt(cellTempMatch[1], 10);
+            const group = parseInt(cellTempMatch[2], 10) - 1;
+            const sensor = parseInt(cellTempMatch[3], 10) - 1;
+            if (group >= 0 && group < 18 && sensor >= 0 && sensor < 3) {
+              channel = group * 3 + sensor;
+            }
           } else {
-            const ambientMatch = key.match(/^Ambient_Temp_[12]_(\d+)$/);
+            const ambientMatch = key.match(/^AmbientTemp_m(\d+)_(\d+)$/);
             if (ambientMatch) {
-              tempNum = parseInt(ambientMatch[1], 10);
+              moduleId = parseInt(ambientMatch[1], 10);
+              const idx = parseInt(ambientMatch[2], 10) - 1;
+              if (idx >= 0 && idx < 2) channel = 54 + idx;
             }
           }
-          if (tempNum === null || Number.isNaN(tempNum)) return;
+          if (moduleId === null || channel === null) return;
 
-          const moduleId = Math.floor(tempNum / 56);
-          const channel = tempNum % 56;
           if (moduleId >= 0 && moduleId < 6 && channel >= 0 && channel < 56) {
             const value = typeof signalData === 'object' && signalData !== null
               ? signalData.value

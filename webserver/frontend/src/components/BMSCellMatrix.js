@@ -24,11 +24,11 @@ function BMSCellMatrix({ messages }) {
             ? signalData.value 
             : signalData;
           
-          const cellMatch = key.match(/Cell_(\d+)_Voltage/);
+          // New DBC naming: CellVoltage_m<module>_cellgrp<group>
+          const cellMatch = key.match(/^CellVoltage_m(\d+)_cellgrp(\d+)$/);
           if (cellMatch) {
-            const cellNum = parseInt(cellMatch[1]) - 1;
-            const cellModuleId = Math.floor(cellNum / 18);
-            const cellIdx = cellNum % 18;
+            const cellModuleId = parseInt(cellMatch[1], 10);
+            const cellIdx = parseInt(cellMatch[2], 10) - 1;
             
             if (cellModuleId >= 0 && cellModuleId < 6 && cellIdx >= 0 && cellIdx < 18 && typeof value === 'number') {
               const voltage = value > 100 ? value / 1000 : value;

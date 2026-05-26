@@ -60,13 +60,33 @@ const normalizeStackVoltage = (value) => {
 };
 
 const parseCellId = (name) => {
-  const match = name.match(/Cell_(\d+)_Voltage/);
-  return match ? parseInt(match[1], 10) : null;
+  // New: CellVoltage_m<module>_cellgrp<group> -> pack-wide cell ID 1..108 for display refs.
+  const m = name.match(/^CellVoltage_m(\d+)_cellgrp(\d+)$/);
+  if (m) {
+    const moduleId = parseInt(m[1], 10);
+    const group = parseInt(m[2], 10);
+    return moduleId * 18 + group;
+  }
+  return null;
 };
 
 const parseTempId = (name) => {
-  const match = name.match(/Temp_(\d+)/);
-  return match ? parseInt(match[1], 10) : null;
+  // New: Temp_m<module>_cellgrp<group>_<sensor>
+  const m = name.match(/^Temp_m(\d+)_cellgrp(\d+)_(\d+)$/);
+  if (m) {
+    const moduleId = parseInt(m[1], 10);
+    const group = parseInt(m[2], 10) - 1;
+    const sensor = parseInt(m[3], 10) - 1;
+    return moduleId * 56 + group * 3 + sensor;
+  }
+  // AmbientTemp_m<module>_<idx>
+  const a = name.match(/^AmbientTemp_m(\d+)_(\d+)$/);
+  if (a) {
+    const moduleId = parseInt(a[1], 10);
+    const idx = parseInt(a[2], 10) - 1;
+    return moduleId * 56 + 54 + idx;
+  }
+  return null;
 };
 
 const getExtrema = (items, validator = isValidVoltage) => {
@@ -157,10 +177,10 @@ function BMSStatus({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
       const msgName = msg?.decoded?.message_name || '';
       const ids = new Set();
 
-      const tempMatch = msgName.match(/Cell_Temp_(\d+)_/);
-      if (tempMatch) ids.add(Math.floor(parseInt(tempMatch[1], 10) / 56));
-      const voltMatch = msgName.match(/Cell_Voltage_(\d+)_/);
-      if (voltMatch) ids.add(Math.floor((parseInt(voltMatch[1], 10) - 1) / 18));
+      const tempMatch = msgName.match(/^Temp_m(\d+)_/);
+      if (tempMatch) ids.add(parseInt(tempMatch[1], 10));
+      const voltMatch = msgName.match(/^CellVoltage_m(\d+)_/);
+      if (voltMatch) ids.add(parseInt(voltMatch[1], 10));
       const suffixMatch = msgName.match(/_(\d)$/);
       if (suffixMatch) ids.add(parseInt(suffixMatch[1], 10));
 
@@ -189,15 +209,13 @@ function BMSStatus({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
       const msgName = msg.decoded.message_name;
       let moduleId = null;
 
-      const tempMatch = msgName.match(/Cell_Temp_(\d+)_/);
+      const tempMatch = msgName.match(/^Temp_m(\d+)_/);
       if (tempMatch) {
-        const thermNum = parseInt(tempMatch[1], 10);
-        moduleId = Math.floor(thermNum / 56);
+        moduleId = parseInt(tempMatch[1], 10);
       } else {
-        const voltMatch = msgName.match(/Cell_Voltage_(\d+)_/);
+        const voltMatch = msgName.match(/^CellVoltage_m(\d+)_/);
         if (voltMatch) {
-          const cellNum = parseInt(voltMatch[1], 10);
-          moduleId = Math.floor((cellNum - 1) / 18);
+          moduleId = parseInt(voltMatch[1], 10);
         } else {
           const moduleSuffixMatch = msgName.match(/_(\d)$/);
           if (moduleSuffixMatch) {
@@ -275,9 +293,9 @@ function BMSStatus({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
         newModuleData[moduleId].bms2Status = msg.decoded.signals;
       } else if (msgName.startsWith('Cell_Temp_Summary_')) {
         newModuleData[moduleId].tempSummary = msg.decoded.signals;
-      } else if (/^Cell_Temp_\d+_/.test(msgName)) {
+      } else if (/^Temp_m\d+_/.test(msgName)) {
         Object.entries(msg.decoded.signals).forEach(([name, signal]) => {
-          if (name.startsWith('Temp_')) {
+          if (name.startsWith('Temp_') || name.startsWith('AmbientTemp_')) {
             newModuleData[moduleId].temperatures[name] = {
               name,
               value: getSignalValue(signal),
@@ -287,9 +305,9 @@ function BMSStatus({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
             };
           }
         });
-      } else if (msgName.startsWith('Cell_Voltage_')) {
+      } else if (msgName.startsWith('CellVoltage_m')) {
         Object.entries(msg.decoded.signals).forEach(([name, signal]) => {
-          if (name.includes('Voltage')) {
+          if (name.startsWith('CellVoltage_m')) {
             newModuleData[moduleId].voltages[name] = {
               name,
               value: getSignalValue(signal),

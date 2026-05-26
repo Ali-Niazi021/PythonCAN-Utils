@@ -25,12 +25,11 @@ function CellVoltageMonitor({ messages }) {
             ? signalData.value 
             : signalData;
           
-          // Match Cell_X_Voltage pattern
-          const cellMatch = key.match(/Cell_(\d+)_Voltage/);
+          // New DBC naming: CellVoltage_m<module>_cellgrp<group>
+          const cellMatch = key.match(/^CellVoltage_m(\d+)_cellgrp(\d+)$/);
           if (cellMatch) {
-            const cellNum = parseInt(cellMatch[1]) - 1; // 0-indexed
-            const cellModuleId = Math.floor(cellNum / 18);
-            const cellIdx = cellNum % 18;
+            const cellModuleId = parseInt(cellMatch[1], 10);
+            const cellIdx = parseInt(cellMatch[2], 10) - 1;
             
             if (cellModuleId >= 0 && cellModuleId < 6 && cellIdx >= 0 && cellIdx < 18 && typeof value === 'number') {
               // Convert to volts if needed (assume mV if > 100)
