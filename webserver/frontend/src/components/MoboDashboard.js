@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Activity, AlertTriangle, Battery, CheckCircle, Cpu, Gauge, Power,
+  Activity, AlertTriangle, Battery, CheckCircle, Cpu, Gauge, Power, Repeat,
   Settings, ShieldAlert, SlidersHorizontal, ToggleRight, Zap,
 } from 'lucide-react';
 import { useNowTick, isTimestampStale, messageFreshnessTimestamp } from '../hooks/useStaleness';
@@ -28,7 +28,17 @@ const RELAY_CHANNELS = [
   { key: 'pump', label: 'Pump', bit: 0, commanded: 'Pump_Commanded', actual: 'Pump_Actual', state: 'Pump_State' },
   { key: 'drs', label: 'DRS', bit: 1, commanded: 'DRS_Commanded', actual: 'DRS_Actual', state: 'DRS_State' },
   { key: 'fans', label: 'Fans', bit: 2, commanded: 'Fans_Commanded', actual: 'Fans_Actual', state: 'Fans_State' },
-  { key: 'radiator', label: 'Radiator', bit: 3, commanded: 'Rad_Commanded', actual: 'Rad_Actual', state: 'Rad_State' },
+  {
+    key: 'radiatorFans',
+    label: 'Radiator Fans',
+    bit: 3,
+    commanded: 'Radiator_Fans_Commanded',
+    actual: 'Radiator_Fans_Actual',
+    state: 'Radiator_Fans_State',
+    legacyCommanded: 'Rad_Commanded',
+    legacyActual: 'Rad_Actual',
+    legacyState: 'Rad_State',
+  },
 ];
 
 const SAFETY_INPUTS = [
@@ -44,6 +54,8 @@ const SYSTEM_STATES = {
   0: 'INIT',
   1: 'STANDBY',
   2: 'ACTIVE',
+  3: 'FAULT',
+  4: 'RECOVERY',
 };
 
 const RELAY_STATES = {
@@ -59,6 +71,7 @@ const CONFIG_PARAMS = [
   { id: 0x02, label: 'HC offset', unit: 'mA', min: -2147483648, max: 2147483647, defaultValue: 0 },
   { id: 0x03, label: 'VDIV numerator', unit: '', min: 0, max: 2147483647, defaultValue: 1 },
   { id: 0x04, label: 'VDIV denominator', unit: '', min: 1, max: 2147483647, defaultValue: 1 },
+  { id: 0x05, label: 'RPI timeout', unit: 'ms', min: 0, max: 2147483647, defaultValue: 0 },
 ];
 
 const isMoboMessage = (msg) => {
@@ -109,6 +122,19 @@ const isBitSet = (signal) => {
   return num === null ? null : num !== 0;
 };
 
+const getSignalByNames = (signals, ...names) => {
+  if (!signals) return undefined;
+  return names.map((name) => signals[name]).find((signal) => signal !== undefined);
+};
+
+const getRelaySignal = (signals, channel, kind) => getSignalByNames(
+  signals,
+  channel[kind],
+  channel[`legacy${kind[0].toUpperCase()}${kind.slice(1)}`],
+);
+
+const getSafetyFault = (signal) => isBitSet(signal);
+
 const formatBool = (signal, trueLabel = 'ON', falseLabel = 'OFF') => {
   const value = isBitSet(signal);
   if (value === null) return '--';
@@ -136,7 +162,7 @@ const idLabel = (id) => `0x${id.toString(16).toUpperCase().padStart(8, '0')}`;
 const maskLabel = (mask) => `0x${(mask & 0x0F).toString(16).toUpperCase()}`;
 
 const maskFromSignals = (signals) => RELAY_CHANNELS.reduce((mask, channel) => {
-  const active = isBitSet(signals?.[channel.commanded]);
+  const active = isBitSet(getRelaySignal(signals, channel, 'commanded'));
   return active ? mask | (1 << channel.bit) : mask;
 }, 0);
 
@@ -168,6 +194,9 @@ function Freshness({ timestamp, nowMs, staleTimeoutMs }) {
   );
 }
 
+const ACC_FANS_BIT = 4;
+const ACC_FANS_TOGGLE_PERIOD_MS = 30000;
+
 function MoboDashboard({
   messages,
   dbcFiles = [],
@@ -177,6 +206,7 @@ function MoboDashboard({
   const nowMs = useNowTick(1000);
   const [requestMask, setRequestMask] = useState(0);
   const [requestDirty, setRequestDirty] = useState(false);
+  const [accFansRequested, setAccFansRequested] = useState(false);
   const [sendBusy, setSendBusy] = useState(false);
   const [sendStatus, setSendStatus] = useState(null);
   const [configParamId, setConfigParamId] = useState(CONFIG_PARAMS[0].id);
@@ -223,6 +253,10 @@ function MoboDashboard({
       const next = maskFromSignals(relaySignals);
       return prev === next ? prev : next;
     });
+    const accActive = isBitSet(relaySignals.Acc_Fans_Active);
+    if (accActive !== null) {
+      setAccFansRequested((prev) => (prev === accActive ? prev : accActive));
+    }
   }, [framesByName, requestDirty, sendBusy]);
 
   useEffect(() => {
@@ -257,15 +291,18 @@ function MoboDashboard({
     }
   };
 
-  const sendRelayCommand = async (mask = requestMask) => {
+  const sendRelayCommand = async (mask = requestMask, accFans = accFansRequested) => {
     const safeMask = mask & 0x0F;
+    const accBit = accFans ? (1 << ACC_FANS_BIT) : 0;
+    const enable = (safeMask !== 0 || accFans) ? 0x01 : 0x00;
     const ok = await sendFrame(
       COMMAND_IDS.vcu,
-      [0x01, safeMask, 0, 0, 0, 0, 0, 0],
-      `VCU ${maskLabel(safeMask)} sent`,
+      [enable, safeMask | accBit, 0, 0, 0, 0, 0, 0],
+      `VCU ${maskLabel(safeMask)}${accFans ? ' + Acc Fans' : ''} sent`,
     );
     if (ok) {
       setRequestMask(safeMask);
+      setAccFansRequested(accFans);
       setRequestDirty(false);
     }
   };
@@ -274,7 +311,7 @@ function MoboDashboard({
     const next = mask & 0x0F;
     setRequestMask(next);
     setRequestDirty(true);
-    sendRelayCommand(next);
+    sendRelayCommand(next, accFansRequested);
   };
 
   const sendRelayBit = (bit, enabled) => {
@@ -282,7 +319,13 @@ function MoboDashboard({
     const safeNext = next & 0x0F;
     setRequestMask(safeNext);
     setRequestDirty(true);
-    sendRelayCommand(safeNext);
+    sendRelayCommand(safeNext, accFansRequested);
+  };
+
+  const setAccFansAndSend = (enabled) => {
+    setAccFansRequested(enabled);
+    setRequestDirty(true);
+    sendRelayCommand(requestMask, enabled);
   };
 
   const resetMobo = () => {
@@ -318,6 +361,17 @@ function MoboDashboard({
   const errorsClear = errorFlagsValue === 0;
   const errorHealthText = errorFlagsValue === null ? 'Errors unknown' : errorsClear ? 'Errors clear' : 'Errors active';
   const errorHealthVariant = errorFlagsValue === null ? 'neutral' : errorsClear ? 'success' : 'error';
+  const pumpOverrideActive = relayStatus?.signals?.Pump_Actual !== undefined
+    && relayStatus?.signals?.Pump_Commanded !== undefined
+    && isBitSet(relayStatus.signals.Pump_Actual)
+    && !isBitSet(relayStatus.signals.Pump_Commanded);
+  const accFansActiveBit = isBitSet(relayStatus?.signals?.Acc_Fans_Active);
+  const accFansActive = accFansActiveBit === true;
+  const accFansPhaseBit = isBitSet(relayStatus?.signals?.Acc_Fans_Phase);
+  const accFansPhaseLabel = accFansPhaseBit === null
+    ? '--'
+    : accFansPhaseBit ? 'FANS' : 'DRS';
+  const accFansAckPending = accFansActiveBit !== null && accFansActiveBit !== accFansRequested;
   const selectedConfigParam = CONFIG_PARAMS.find((param) => param.id === configParamId) || CONFIG_PARAMS[0];
 
   return (
@@ -325,7 +379,7 @@ function MoboDashboard({
       <div className="mobo-header">
         <div>
           <h2><Cpu size={22} /> MOBO Dashboard</h2>
-          <p>Extended MOBO control and telemetry from {MOBO_DBC_FILENAME}.</p>
+          <p>VCU-commanded MOBO control and extended telemetry from {MOBO_DBC_FILENAME}.</p>
         </div>
         <div className="mobo-header-actions">
           <span className={`mobo-dbc-pill ${moboDbcEnabled ? 'enabled' : 'disabled'}`}>
@@ -357,18 +411,65 @@ function MoboDashboard({
           {sendStatus && <StatusPill value={sendStatus.text} variant={sendStatus.type} />}
         </div>
 
+        <div className="mobo-acc-fans-card">
+          <div className="mobo-acc-fans-header">
+            <div className="mobo-acc-fans-title">
+              <Repeat size={18} />
+              <div>
+                <strong>Acc Fans</strong>
+                <p>Alternates DRS and Fans every {ACC_FANS_TOGGLE_PERIOD_MS / 1000}s. Overrides individual DRS / Fans requests while active.</p>
+              </div>
+            </div>
+            <div className="mobo-acc-fans-status">
+              <StatusPill
+                value={accFansActiveBit === null ? 'No feedback' : accFansActive ? 'ACTIVE' : 'IDLE'}
+                variant={accFansActiveBit === null ? 'neutral' : accFansActive ? 'success' : 'neutral'}
+              />
+              {accFansActive && (
+                <StatusPill value={`Driving: ${accFansPhaseLabel}`} variant="warning" />
+              )}
+              {accFansAckPending && (
+                <StatusPill value="PENDING" variant="pending" />
+              )}
+            </div>
+          </div>
+          <div className="mobo-acc-fans-actions" role="group" aria-label="Acc Fans control">
+            <button
+              type="button"
+              className={!accFansRequested ? 'active' : ''}
+              onClick={() => setAccFansAndSend(false)}
+              disabled={sendBusy}
+            >
+              Off
+            </button>
+            <button
+              type="button"
+              className={accFansRequested ? 'active' : ''}
+              onClick={() => setAccFansAndSend(true)}
+              disabled={sendBusy}
+            >
+              On
+            </button>
+          </div>
+        </div>
+
         <div className="mobo-relay-command-grid">
           {RELAY_CHANNELS.map((channel) => {
             const requested = (requestMask & (1 << channel.bit)) !== 0;
-            const accepted = isBitSet(relayStatus?.signals?.[channel.commanded]);
-            const actual = isBitSet(relayStatus?.signals?.[channel.actual]);
-            const state = getEnumDisplay(relayStatus?.signals?.[channel.state], RELAY_STATES);
+            const commandedSignal = getRelaySignal(relayStatus?.signals, channel, 'commanded');
+            const actualSignal = getRelaySignal(relayStatus?.signals, channel, 'actual');
+            const stateSignal = getRelaySignal(relayStatus?.signals, channel, 'state');
+            const accepted = isBitSet(commandedSignal);
+            const actual = isBitSet(actualSignal);
+            const state = getEnumDisplay(stateSignal, RELAY_STATES);
             const commandMatchesRequest = accepted !== null && accepted === requested;
             const feedbackMatchesCommand = accepted !== null && actual !== null && accepted === actual;
+            const overridden = accFansActive && (channel.key === 'drs' || channel.key === 'fans');
             return (
               <div
                 key={channel.key}
-                className={`mobo-relay-card ${actual ? 'actual-on' : 'actual-off'} ${feedbackMatchesCommand ? 'matched' : 'mismatch'}`}
+                className={`mobo-relay-card ${actual ? 'actual-on' : 'actual-off'} ${feedbackMatchesCommand ? 'matched' : 'mismatch'} ${overridden ? 'overridden' : ''}`}
+                title={overridden ? 'Overridden by Acc Fans' : undefined}
               >
                 <div className="mobo-relay-top">
                   <span className="mobo-relay-name">{channel.label}</span>
@@ -382,7 +483,7 @@ function MoboDashboard({
                     type="button"
                     className={!requested ? 'active' : ''}
                     onClick={() => sendRelayBit(channel.bit, false)}
-                    disabled={sendBusy}
+                    disabled={sendBusy || overridden}
                   >
                     Off
                   </button>
@@ -390,15 +491,15 @@ function MoboDashboard({
                     type="button"
                     className={requested ? 'active' : ''}
                     onClick={() => sendRelayBit(channel.bit, true)}
-                    disabled={sendBusy}
+                    disabled={sendBusy || overridden}
                   >
                     On
                   </button>
                 </div>
 
                 <div className="mobo-relay-feedback-grid">
-                  <div><span>Commanded</span><strong>{formatBool(relayStatus?.signals?.[channel.commanded])}</strong></div>
-                  <div><span>Actual</span><strong>{formatBool(relayStatus?.signals?.[channel.actual])}</strong></div>
+                  <div><span>Commanded</span><strong>{formatBool(commandedSignal)}</strong></div>
+                  <div><span>Actual</span><strong>{formatBool(actualSignal)}</strong></div>
                   <div><span>State</span><strong>{state}</strong></div>
                   <div><span>Send</span><strong>{commandMatchesRequest ? 'ACK' : 'PENDING'}</strong></div>
                 </div>
@@ -454,7 +555,7 @@ function MoboDashboard({
               </div>
               <div className="mobo-split-grid">
                 <div><span>Accepted Mask</span><strong>{maskLabel(maskFromSignals(relayStatus?.signals))}</strong></div>
-                <div><span>Actual Source</span><strong>Relay readback</strong></div>
+                <div><span>Pump Override</span><strong>{formatBool(pumpOverrideActive, 'ACTIVE', 'IDLE')}</strong></div>
               </div>
             </section>
 
@@ -466,7 +567,7 @@ function MoboDashboard({
               <div className="mobo-split-grid">
                 <div><span>Battery</span><strong>{getDisplay(getSignal('Battery_Voltage'), '--', 3)}</strong></div>
                 <div><span>5V Rail</span><strong>{getDisplay(getSignal('FiveV_Sense'), '--', 3)}</strong></div>
-                <div><span>Brake</span><strong>{getDisplay(getSignal('Brake_Input'), '--', 3)}</strong></div>
+                <div><span>Rear Brake</span><strong>{getDisplay(getSignal('BSE_PSI_Rear'), '--', 1)}</strong></div>
                 <div><span>LV ADC</span><strong>{getDisplay(getSignal('LV_Current_Raw'))}</strong></div>
               </div>
             </section>
@@ -494,7 +595,7 @@ function MoboDashboard({
               <div className="mobo-safety-table">
                 <div className="mobo-safety-head"><span>Input</span><span>Raw</span><span>Debounced</span><span>Latched</span></div>
                 {SAFETY_INPUTS.map((input) => {
-                  const values = [input.raw, input.debounced, input.latched].map((name) => isBitSet(safety?.signals?.[name]));
+                  const values = [input.raw, input.debounced, input.latched].map((name) => getSafetyFault(safety?.signals?.[name]));
                   return (
                     <div key={input.key} className="mobo-safety-row">
                       <span>{input.label}</span>

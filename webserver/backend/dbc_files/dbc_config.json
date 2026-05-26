@@ -10,7 +10,7 @@
     },
     {
       "filename": "BMS-Firmware-RTOS-Complete.dbc",
-      "enabled": false
+      "enabled": true
     },
     {
       "filename": "hvc.dbc",
@@ -26,10 +26,14 @@
     },
     {
       "filename": "DAQBus.dbc",
+      "enabled": false
+    },
+    {
+      "filename": "ControlsBus.dbc",
       "enabled": true
     },
     {
-      "filename": "STM32L432_Bootloader.dbc",
+      "filename": "master.dbc",
       "enabled": true
     }
   ]

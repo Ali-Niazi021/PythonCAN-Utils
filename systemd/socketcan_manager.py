@@ -174,22 +174,21 @@ def print_summary(interfaces: List[CanInterface], plan: Dict[str, str], bitrate:
         driver = iface.driver or "unknown"
         print(f"- {iface.name}: adapter={iface.adapter_type} driver={driver} role={role} target={target}")
 
-    managed_usb = [iface for iface in interfaces if iface.is_usb]
-    if managed_usb:
-        print(f"Configured USB SocketCAN bitrate: {bitrate}")
+    if plan:
+        print(f"Configured SocketCAN bitrate for managed interfaces: {bitrate}")
     else:
-        print("No USB CAN interfaces found to manage.")
+        print("No CAN interfaces found to manage.")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Normalize USB CAN adapters onto SocketCAN can2+ for TREVCAN Explorer."
+        description="Normalize onboard CAN as can0/can1 and USB CAN adapters as can2+ for TREVCAN Explorer."
     )
     parser.add_argument(
         "--bitrate",
         type=int,
         default=int(os.environ.get("TREVCAN_SOCKETCAN_BITRATE", "500000")),
-        help="SocketCAN bitrate for managed USB adapters (default: %(default)s)",
+        help="SocketCAN bitrate for managed interfaces (default: %(default)s)",
     )
     parser.add_argument(
         "--dry-run",
@@ -209,15 +208,13 @@ def main() -> int:
     load_kernel_modules(dry_run=args.dry_run)
     interfaces = list_can_interfaces()
     plan = build_plan(interfaces)
-    usb_targets = [plan[iface.name] for iface in interfaces if iface.is_usb and iface.name in plan]
     print_summary(interfaces, plan, args.bitrate)
 
     if not plan:
         return 0
 
     rename_interfaces(plan, dry_run=args.dry_run)
-    if usb_targets:
-        bring_up_interfaces(sorted(usb_targets), bitrate=args.bitrate, dry_run=args.dry_run)
+    bring_up_interfaces(sorted(set(plan.values())), bitrate=args.bitrate, dry_run=args.dry_run)
     return 0
 
 

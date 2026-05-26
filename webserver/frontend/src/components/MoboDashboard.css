@@ -267,6 +267,94 @@
   justify-content: space-between;
 }
 
+.mobo-acc-fans-card {
+  padding: 14px 16px;
+  border-radius: 8px;
+  border: 1px solid #3f3f46;
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.08), rgba(15, 15, 15, 0.6));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mobo-acc-fans-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.mobo-acc-fans-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: #93c5fd;
+}
+
+.mobo-acc-fans-title strong {
+  display: block;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.mobo-acc-fans-title p {
+  margin: 2px 0 0;
+  color: #9ca3af;
+  font-size: 12px;
+  max-width: 520px;
+}
+
+.mobo-acc-fans-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mobo-acc-fans-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  max-width: 260px;
+  overflow: hidden;
+  border: 1px solid #333;
+  border-radius: 6px;
+}
+
+.mobo-acc-fans-actions button {
+  min-height: 40px;
+  border: 0;
+  border-right: 1px solid #333;
+  background: #171717;
+  color: #aaa;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.mobo-acc-fans-actions button:last-child {
+  border-right: 0;
+}
+
+.mobo-acc-fans-actions button:first-child.active {
+  background: #374151;
+  color: #fff;
+}
+
+.mobo-acc-fans-actions button:last-child.active {
+  background: #2563eb;
+  color: #fff;
+}
+
+.mobo-acc-fans-actions button:hover:not(:disabled) {
+  background: #2a2a2a;
+  color: #fff;
+}
+
+.mobo-acc-fans-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .mobo-relay-command-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(180px, 1fr));
@@ -292,6 +380,23 @@
 
 .mobo-relay-card.mismatch {
   border-color: #92400e;
+}
+
+.mobo-relay-card.overridden {
+  opacity: 0.55;
+  filter: grayscale(0.4);
+  border-style: dashed;
+}
+
+.mobo-relay-card.overridden::after {
+  content: 'Acc Fans override';
+  display: block;
+  margin-top: -4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #93c5fd;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .mobo-relay-top {
