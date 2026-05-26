@@ -19,8 +19,8 @@ export function useNowTick(intervalMs = 1000) {
 }
 
 /**
- * Determine if a message timestamp (Unix epoch seconds, as produced by the
- * Python backend) is stale relative to `nowMs` (Date.now() value) given a
+ * Determine if a message freshness timestamp (Unix epoch seconds, preferably
+ * backend receipt time) is stale relative to `nowMs` (Date.now() value) given a
  * stale timeout in milliseconds.
  *
  * Returns false when the timestamp is missing/invalid so callers don't flag
@@ -36,13 +36,26 @@ export function isTimestampStale(timestampSeconds, nowMs, staleTimeoutMs) {
 }
 
 /**
- * Returns the freshest (max) timestamp from a list of messages, in seconds.
+ * Receipt time is the reliability anchor for freshness checks. Driver or bus
+ * timestamps may be device uptime, monotonic ticks, or another host's clock.
+ */
+export function messageFreshnessTimestamp(message) {
+  const receivedAt = typeof message?.received_at === 'number' ? message.received_at : null;
+  if (receivedAt !== null && isFinite(receivedAt) && receivedAt > 0) return receivedAt;
+
+  const timestamp = typeof message?.timestamp === 'number' ? message.timestamp : null;
+  return timestamp !== null && isFinite(timestamp) && timestamp > 0 ? timestamp : null;
+}
+
+/**
+ * Returns the freshest (max) receipt/fallback timestamp from a list of messages,
+ * in seconds.
  * Returns null if no valid timestamps are present.
  */
 export function freshestTimestamp(messages) {
   let max = -Infinity;
   for (const msg of messages) {
-    const t = typeof msg?.timestamp === 'number' ? msg.timestamp : null;
+    const t = messageFreshnessTimestamp(msg);
     if (t !== null && t > max) max = t;
   }
   return max === -Infinity ? null : max;

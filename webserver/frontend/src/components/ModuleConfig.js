@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Settings, Send, RefreshCw, Check, X, AlertTriangle } from 'lucide-react';
-import { useNowTick, isTimestampStale } from '../hooks/useStaleness';
+import { useNowTick, isTimestampStale, messageFreshnessTimestamp } from '../hooks/useStaleness';
 import { useIsMobile } from '../hooks/useIsMobile';
 import './ModuleConfig.css';
 
@@ -454,7 +454,7 @@ function ModuleConfig({ messages, onSendMessage, connected, onRegisterRawCallbac
           let lastTs = null;
           if (messages) {
             for (const msg of messages) {
-              const t = typeof msg?.timestamp === 'number' ? msg.timestamp : null;
+              const t = messageFreshnessTimestamp(msg);
               if (t === null) continue;
               const msgName = msg?.decoded?.message_name || '';
               const suffixMatch = msgName.match(/_(\d)$/);

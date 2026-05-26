@@ -1519,7 +1519,7 @@ class CANBackend:
 
         battery_voltage_v = round((12800.0 + (1400.0 * wave) + random.uniform(-50.0, 50.0)) / 1000.0, 3)
         fivev_sense = round((4950.0 + random.uniform(-35.0, 35.0)) / 1000.0, 3)
-        brake_input = round(0.5 + (4.0 * wave) + random.uniform(-0.15, 0.15), 3)
+        brake_pressure_psi = round((300.0 + (1200.0 * wave) + random.uniform(-12.0, 12.0)), 1)
 
         lv_current = round((lc_current * 0.12) + random.uniform(-0.8, 0.8), 3)
         hc_current_mobo = round((hc_current * 0.18) + random.uniform(-0.8, 0.8), 3)
@@ -1595,7 +1595,7 @@ class CANBackend:
             'MOBO_Power_Telemetry': {
                 'Battery_Voltage': battery_voltage_v,
                 'FiveV_Sense': fivev_sense,
-                'Brake_Input': brake_input,
+                'BSE_PSI_Rear': brake_pressure_psi,
                 'LV_Current_Raw': lv_current_raw,
             },
             'MOBO_Current_Telemetry': {
@@ -1628,16 +1628,17 @@ class CANBackend:
                 'Pump_Commanded': pump_on,
                 'DRS_Commanded': drs_on,
                 'Fans_Commanded': fans_on,
-                'Rad_Commanded': rad_on,
+                'Radiator_Fans_Commanded': rad_on,
                 'Pump_Actual': pump_on,
                 'DRS_Actual': drs_on,
                 'Fans_Actual': fans_on,
-                'Rad_Actual': rad_on,
+                'Radiator_Fans_Actual': rad_on,
                 'Pump_State': 2 if pump_on else 0,
                 'DRS_State': 2 if drs_on else 0,
                 'Fans_State': 2 if fans_on else 0,
-                'Rad_State': 2 if rad_on else 0,
-                'Reserved_B4': 0,
+                'Radiator_Fans_State': 2 if rad_on else 0,
+                'Acc_Fans_Active': 0,
+                'Acc_Fans_Phase': 0,
                 'Ms_Since_Cmd': int((elapsed * 1000.0) % 5000.0),
             },
         }
@@ -2055,12 +2056,14 @@ class CANBackend:
         the async broadcast on the main event loop.
         """
         self.message_count += 1
+        received_at = time.time()
         
         # Convert message to JSON-serializable format
         message_data = {
             'id': msg.id,
             'data': list(msg.data),
             'timestamp': msg.timestamp,
+            'received_at': received_at,
             'is_extended': msg.is_extended,
             'is_remote': msg.is_remote,
             'dlc': msg.dlc

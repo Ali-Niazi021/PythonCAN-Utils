@@ -3,7 +3,7 @@ import {
   Battery, Activity, Gauge, Thermometer, AlertTriangle, Zap, RotateCcw, Settings, Radio,
 } from 'lucide-react';
 import { apiService } from '../services/api';
-import { useNowTick, isTimestampStale } from '../hooks/useStaleness';
+import { useNowTick, isTimestampStale, messageFreshnessTimestamp } from '../hooks/useStaleness';
 import './HVCDashboard.css';
 
 // HVC firmware reset trigger (extended ID, not currently in hvc.dbc).
@@ -215,9 +215,10 @@ function HVCDashboard({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
       const key = HVC_MESSAGE_MAP[decoded.message_name];
       if (!key) return;
       const ts = typeof msg.timestamp === 'number' ? msg.timestamp : null;
+      const freshnessTs = messageFreshnessTimestamp(msg);
       const existing = acc[key];
       if (!existing || (ts !== null && ts > existing.timestamp)) {
-        acc[key] = { signals: decoded.signals, timestamp: ts };
+        acc[key] = { signals: decoded.signals, timestamp: ts, freshnessTimestamp: freshnessTs };
       }
     });
     return acc;
@@ -334,8 +335,8 @@ function HVCDashboard({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
     .sort(([a], [b]) => a.localeCompare(b));
 
   const renderFreshness = (frame) => (
-    <span className={`freshness ${freshnessClass(frame?.timestamp, nowMs, staleTimeoutMs)}`}>
-      {freshnessLabel(frame?.timestamp, nowMs)}
+    <span className={`freshness ${freshnessClass(frame?.freshnessTimestamp, nowMs, staleTimeoutMs)}`}>
+      {freshnessLabel(frame?.freshnessTimestamp, nowMs)}
     </span>
   );
 

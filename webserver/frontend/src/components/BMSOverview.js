@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { Battery, Thermometer, TrendingUp, TrendingDown, Zap } from 'lucide-react';
-import { useNowTick, isTimestampStale } from '../hooks/useStaleness';
+import { useNowTick, isTimestampStale, messageFreshnessTimestamp } from '../hooks/useStaleness';
 import './BMSOverview.css';
 
 function BMSOverview({ messages, staleTimeoutMs = 30000 }) {
@@ -27,12 +27,11 @@ function BMSOverview({ messages, staleTimeoutMs = 30000 }) {
             ? signalData.value 
             : signalData;
           
-          const cellMatch = key.match(/Cell_(\d+)_Voltage/);
+          // New DBC naming: CellVoltage_m<module>_cellgrp<group> (group 1..18 per module)
+          const cellMatch = key.match(/^CellVoltage_m(\d+)_cellgrp(\d+)$/);
           if (cellMatch) {
-            const cellNum = parseInt(cellMatch[1]) - 1;
-            const cellModuleId = Math.floor(cellNum / 18);
-            const cellIdx = cellNum % 18;
-            
+            const cellModuleId = parseInt(cellMatch[1], 10);
+            const cellIdx = parseInt(cellMatch[2], 10) - 1;
             if (cellModuleId >= 0 && cellModuleId < 6 && cellIdx >= 0 && cellIdx < 18 && typeof value === 'number') {
               const voltage = value > 100 ? value / 1000 : value;
               modules[cellModuleId][cellIdx] = voltage;
@@ -124,23 +123,31 @@ function BMSOverview({ messages, staleTimeoutMs = 30000 }) {
         const signals = msg.decoded.signals;
         
         Object.entries(signals).forEach(([key, signalData]) => {
-          let tempNum = null;
+          let moduleId = null;
+          let channel = null;
 
-          const tempMatch = key.match(/^Temp_(\d+)$/);
-          if (tempMatch) {
-            tempNum = parseInt(tempMatch[1], 10);
+          // Cell thermistor: Temp_m<module>_cellgrp<group>_<sensor> (group 1..18, sensor 1..3)
+          const cellTempMatch = key.match(/^Temp_m(\d+)_cellgrp(\d+)_(\d+)$/);
+          if (cellTempMatch) {
+            moduleId = parseInt(cellTempMatch[1], 10);
+            const group = parseInt(cellTempMatch[2], 10) - 1;
+            const sensor = parseInt(cellTempMatch[3], 10) - 1;
+            if (group >= 0 && group < 18 && sensor >= 0 && sensor < 3) {
+              channel = group * 3 + sensor; // 0..53
+            }
           } else {
-            // New DBC naming for ambient channels (e.g., Ambient_Temp_1_054).
-            const ambientMatch = key.match(/^Ambient_Temp_[12]_(\d+)$/);
+            // Ambient: AmbientTemp_m<module>_<idx> (idx 1..2)
+            const ambientMatch = key.match(/^AmbientTemp_m(\d+)_(\d+)$/);
             if (ambientMatch) {
-              tempNum = parseInt(ambientMatch[1], 10);
+              moduleId = parseInt(ambientMatch[1], 10);
+              const idx = parseInt(ambientMatch[2], 10) - 1;
+              if (idx >= 0 && idx < 2) {
+                channel = 54 + idx; // 54..55
+              }
             }
           }
 
-          if (tempNum === null || Number.isNaN(tempNum)) return;
-
-          const moduleId = Math.floor(tempNum / 56);
-          const channel = tempNum % 56;
+          if (moduleId === null || channel === null) return;
 
           if (moduleId >= 0 && moduleId < 6 && channel >= 0 && channel < 56) {
             const value = typeof signalData === 'object' && signalData !== null 
@@ -228,21 +235,21 @@ function BMSOverview({ messages, staleTimeoutMs = 30000 }) {
   const moduleFreshestTimestamp = useMemo(() => {
     const timestamps = Array(6).fill(null);
     messages.forEach(msg => {
-      const t = typeof msg?.timestamp === 'number' ? msg.timestamp : null;
+      const t = messageFreshnessTimestamp(msg);
       if (t === null) return;
       const msgName = msg?.decoded?.message_name || '';
 
       const moduleIds = new Set();
 
-      // Cell_Voltage_<cell>_<idx> — derive from cell number (1-based, 18 per module).
-      const cellVoltMatch = msgName.match(/Cell_Voltage_(\d+)_/);
+      // CellVoltage_m<module>_cellgrp..._to_cellgrp...
+      const cellVoltMatch = msgName.match(/^CellVoltage_m(\d+)_/);
       if (cellVoltMatch) {
-        moduleIds.add(Math.floor((parseInt(cellVoltMatch[1], 10) - 1) / 18));
+        moduleIds.add(parseInt(cellVoltMatch[1], 10));
       }
-      // Cell_Temp_<therm>_<idx> — derive from thermistor number (0-based, 56 per module).
-      const cellTempMatch = msgName.match(/Cell_Temp_(\d+)_/);
+      // Temp_m<module>_cellgrp...
+      const cellTempMatch = msgName.match(/^Temp_m(\d+)_/);
       if (cellTempMatch) {
-        moduleIds.add(Math.floor(parseInt(cellTempMatch[1], 10) / 56));
+        moduleIds.add(parseInt(cellTempMatch[1], 10));
       }
       // Generic module suffix (BMS_Heartbeat_0, BQ76952_Stack_Voltage_3, BMS1_Balance_Detail_2, ...).
       const suffixMatch = msgName.match(/_(\d)$/);
@@ -270,7 +277,7 @@ function BMSOverview({ messages, staleTimeoutMs = 30000 }) {
     let latest = null;
     messages.forEach(msg => {
       if (msg?.decoded?.message_name !== 'Current_Sensor_Data') return;
-      const t = typeof msg?.timestamp === 'number' ? msg.timestamp : null;
+      const t = messageFreshnessTimestamp(msg);
       if (t !== null && (latest === null || t > latest)) latest = t;
     });
     return latest;

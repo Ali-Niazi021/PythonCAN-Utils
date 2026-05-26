@@ -934,24 +934,33 @@ function CANExplorer({
                 HVC Dashboard
               </button>
             </div>
-            <button
-              className={`sidebar-tab ${activeTab === 'vcu-dashboard' ? 'active' : ''}`}
-              onClick={() => onTabChange('vcu-dashboard')}
-            >
-              VCU
-            </button>
-            <button
-              className={`sidebar-tab ${activeTab === 'inverter-dashboard' ? 'active' : ''}`}
-              onClick={() => onTabChange('inverter-dashboard')}
-            >
-              Inverter (CM200DZ)
-            </button>
-            <button
-              className={`sidebar-tab ${activeTab === 'mobo' ? 'active' : ''}`}
-              onClick={() => onTabChange('mobo')}
-            >
-              MOBO
-            </button>
+            <div className="sidebar-menu-group">
+              <div className="sidebar-menu-header">VCU</div>
+              <button
+                className={`sidebar-tab submenu ${activeTab === 'vcu-dashboard' ? 'active' : ''}`}
+                onClick={() => onTabChange('vcu-dashboard')}
+              >
+                VCU Dashboard
+              </button>
+            </div>
+            <div className="sidebar-menu-group">
+              <div className="sidebar-menu-header">Inverter</div>
+              <button
+                className={`sidebar-tab submenu ${activeTab === 'inverter-dashboard' ? 'active' : ''}`}
+                onClick={() => onTabChange('inverter-dashboard')}
+              >
+                CM200DZ Dashboard
+              </button>
+            </div>
+            <div className="sidebar-menu-group">
+              <div className="sidebar-menu-header">MOBO</div>
+              <button
+                className={`sidebar-tab submenu ${activeTab === 'mobo' ? 'active' : ''}`}
+                onClick={() => onTabChange('mobo')}
+              >
+                MOBO Dashboard
+              </button>
+            </div>
           </div>
         </div>
 

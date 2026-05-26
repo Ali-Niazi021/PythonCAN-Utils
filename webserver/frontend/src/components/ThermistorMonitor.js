@@ -11,20 +11,36 @@ function ThermistorMonitor({ messages }) {
       if (msg.decoded && msg.decoded.signals) {
         const signals = msg.decoded.signals;
         
-        // Look for Temp_XXX signals
+        // Look for module-relative temperature signals
         Object.entries(signals).forEach(([key, signalData]) => {
-          if (key.startsWith('Temp_')) {
-            const tempNum = parseInt(key.split('_')[1]);
-            const moduleId = Math.floor(tempNum / 56);
-            const channel = tempNum % 56;
-            
-            if (moduleId >= 0 && moduleId < 6 && channel >= 0 && channel < 56) {
-              // Extract numeric value from signal metadata object
-              const value = typeof signalData === 'object' && signalData !== null 
-                ? signalData.value 
-                : signalData;
-              modules[moduleId][channel] = typeof value === 'number' ? value : null;
+          let moduleId = null;
+          let channel = null;
+
+          // Cell thermistor: Temp_m<module>_cellgrp<group>_<sensor> (group 1..18, sensor 1..3)
+          const cellTempMatch = key.match(/^Temp_m(\d+)_cellgrp(\d+)_(\d+)$/);
+          if (cellTempMatch) {
+            moduleId = parseInt(cellTempMatch[1], 10);
+            const group = parseInt(cellTempMatch[2], 10) - 1;
+            const sensor = parseInt(cellTempMatch[3], 10) - 1;
+            if (group >= 0 && group < 18 && sensor >= 0 && sensor < 3) {
+              channel = group * 3 + sensor; // 0..53
             }
+          } else {
+            // Ambient: AmbientTemp_m<module>_<idx> (idx 1..2)
+            const ambientMatch = key.match(/^AmbientTemp_m(\d+)_(\d+)$/);
+            if (ambientMatch) {
+              moduleId = parseInt(ambientMatch[1], 10);
+              const idx = parseInt(ambientMatch[2], 10) - 1;
+              if (idx >= 0 && idx < 2) channel = 54 + idx;
+            }
+          }
+
+          if (moduleId === null || channel === null) return;
+          if (moduleId >= 0 && moduleId < 6 && channel >= 0 && channel < 56) {
+            const value = typeof signalData === 'object' && signalData !== null 
+              ? signalData.value 
+              : signalData;
+            modules[moduleId][channel] = typeof value === 'number' ? value : null;
           }
         });
       }
