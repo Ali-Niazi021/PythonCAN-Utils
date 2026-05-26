@@ -25,14 +25,6 @@
       "enabled": true
     },
     {
-      "filename": "DAQBus.dbc",
-      "enabled": false
-    },
-    {
-      "filename": "ControlsBus.dbc",
-      "enabled": true
-    },
-    {
       "filename": "master.dbc",
       "enabled": true
     }
