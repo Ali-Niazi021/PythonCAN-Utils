@@ -1,7 +1,55 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { Send, Trash2, FileText, Filter, Upload, ChevronDown, ChevronRight, ChevronLeft, Activity, Wifi, WifiOff, RefreshCw, List, PanelLeftClose, PanelLeft, Download, X, Eye, EyeOff, Flag, ArrowUp, ArrowDown, GripVertical, Settings as SettingsIcon } from 'lucide-react';
+import { Trash2, FileText, Filter, Upload, ChevronDown, ChevronRight, ChevronLeft, Activity, Wifi, WifiOff, RefreshCw, List, PanelLeftClose, PanelLeft, Download, X, Eye, EyeOff, Flag, ArrowUp, ArrowDown, GripVertical, Settings as SettingsIcon } from 'lucide-react';
 import TransmitList from './TransmitList';
 import './CANExplorer.css';
+
+const BUS_IDS = ['bus1', 'bus2'];
+
+const readStoredValue = (key, fallback) => {
+  if (typeof window === 'undefined') {
+    return fallback;
+  }
+  return window.localStorage.getItem(key) || fallback;
+};
+
+const createInitialConnectionDraft = (busId) => ({
+  deviceType: 'canable',
+  channel: 'Device 0',
+  baudrate: 'BAUD_500K',
+  networkHost: readStoredValue(`${busId}:networkDeviceHost`, '192.168.1.100'),
+  networkPort: readStoredValue(`${busId}:networkDevicePort`, '8080'),
+  bluetoothAddress: readStoredValue(`${busId}:bluetoothAddress`, ''),
+  bluetoothChannel: readStoredValue(`${busId}:bluetoothChannel`, '1'),
+});
+
+const getBusLabel = (busId) => {
+  if (busId === 'bus2') {
+    return 'Bus 2';
+  }
+  if (busId === 'bus1') {
+    return 'Bus 1';
+  }
+  return busId ? String(busId).toUpperCase() : 'Bus 1';
+};
+
+const getBusToneClass = (busId) => (busId === 'bus2' ? 'bus-bus2' : 'bus-bus1');
+
+const formatCanId = (message) => (
+  message.is_extended
+    ? `0x${message.id.toString(16).padStart(8, '0').toUpperCase()}`
+    : `0x${message.id.toString(16).padStart(3, '0').toUpperCase()}`
+);
+
+const getMessageIdentityKey = (message) => `${message.bus_id || 'bus1'}:${message.is_extended ? 'ext' : 'std'}:${message.id}`;
+
+const parseMessageIdentityKey = (identityKey) => {
+  const [busId, frameType, idText] = String(identityKey).split(':');
+  return {
+    busId: busId || 'bus1',
+    isExtended: frameType === 'ext',
+    id: Number(idText),
+  };
+};
 
 function CANExplorer({ 
   connected, 
@@ -62,35 +110,11 @@ function CANExplorer({
   const MAX_ISOLATED_MESSAGES = 1000; // Limit to prevent memory issues
   const DUPLICATE_TIME_THRESHOLD_MS = 1; // Messages within 1ms with same data are duplicates
   
-  // Connection form state
-  const [deviceType, setDeviceType] = useState('canable');
-  const [channel, setChannel] = useState('Device 0');
-  const [baudrate, setBaudrate] = useState('BAUD_500K');
-  
-  // Network device specific state - load from localStorage for persistence
-  const [networkHost, setNetworkHost] = useState(() => {
-    return localStorage.getItem('networkDeviceHost') || '192.168.1.100';
-  });
-  const [networkPort, setNetworkPort] = useState(() => {
-    return localStorage.getItem('networkDevicePort') || '8080';
-  });
-
-  // Bluetooth device specific state - load from localStorage for persistence
-  const [bluetoothAddress, setBluetoothAddress] = useState(() => {
-    return localStorage.getItem('bluetoothAddress') || '';
-  });
-  const [bluetoothChannel, setBluetoothChannel] = useState(() => {
-    return localStorage.getItem('bluetoothChannel') || '1';
-  });
-
-  // Save network settings to localStorage when they change
-  useEffect(() => {
-    localStorage.setItem('networkDeviceHost', networkHost);
-  }, [networkHost]);
-
-  useEffect(() => {
-    localStorage.setItem('networkDevicePort', networkPort);
-  }, [networkPort]);
+  const [connectionDrafts, setConnectionDrafts] = useState(() => ({
+    bus1: createInitialConnectionDraft('bus1'),
+    bus2: createInitialConnectionDraft('bus2'),
+  }));
+  const [selectedTransmitBusId, setSelectedTransmitBusId] = useState(() => readStoredValue('selectedTransmitBusId', 'bus1'));
 
   // Keep the local stale-timeout input in sync if the underlying value changes elsewhere.
   useEffect(() => {
@@ -110,14 +134,15 @@ function CANExplorer({
     setStaleTimeoutInput(String(Math.round(clampedSeconds)));
   }, [onStaleTimeoutChange, staleTimeoutMs]);
 
-  // Save bluetooth settings to localStorage when they change
   useEffect(() => {
-    localStorage.setItem('bluetoothAddress', bluetoothAddress);
-  }, [bluetoothAddress]);
-
-  useEffect(() => {
-    localStorage.setItem('bluetoothChannel', bluetoothChannel);
-  }, [bluetoothChannel]);
+    BUS_IDS.forEach((busId) => {
+      const draft = connectionDrafts[busId];
+      localStorage.setItem(`${busId}:networkDeviceHost`, draft.networkHost);
+      localStorage.setItem(`${busId}:networkDevicePort`, draft.networkPort);
+      localStorage.setItem(`${busId}:bluetoothAddress`, draft.bluetoothAddress);
+      localStorage.setItem(`${busId}:bluetoothChannel`, draft.bluetoothChannel);
+    });
+  }, [connectionDrafts]);
 
   // Register raw message callback for isolation feature
   useEffect(() => {
@@ -125,7 +150,7 @@ function CANExplorer({
     
     const handleRawMessage = (message) => {
       // Only capture messages for isolated IDs
-      if (isolatedIds.has(message.id)) {
+      if (isolatedIds.has(getMessageIdentityKey(message))) {
         const newMessage = {
           ...message,
           sequenceNum: isolatedMessagesRef.current.length + 1,
@@ -147,6 +172,7 @@ function CANExplorer({
           sequence,
           timestamp: message.timestamp,
           id: message.id,
+          bus_id: message.bus_id,
           is_extended: message.is_extended,
           dlc: message.dlc || message.data?.length || 0,
           data: Array.isArray(message.data) ? [...message.data] : [],
@@ -198,29 +224,138 @@ function CANExplorer({
   // Filter devices by type
   const pcanDevices = devices.filter(d => d.device_type === 'pcan');
   const canableDevices = devices.filter(d => d.device_type === 'canable');
-  const networkDevices = devices.filter(d => d.device_type === 'network');
+  const bluetoothDevices = devices.filter(d => d.device_type === 'bluetooth' && d.name !== 'Bluetooth CAN Server');
 
-  // Update channel when devices are loaded or device type changes
+  const busStatusMap = useMemo(() => {
+    const statuses = Array.isArray(connectionStatus?.buses) ? connectionStatus.buses : [];
+    return BUS_IDS.reduce((accumulator, busId) => {
+      accumulator[busId] = statuses.find((status) => status.bus_id === busId) || {
+        bus_id: busId,
+        connected: false,
+        status: 'Disconnected',
+      };
+      return accumulator;
+    }, {});
+  }, [connectionStatus]);
+
+  const busStatsMap = useMemo(() => {
+    const statEntries = Array.isArray(stats?.buses) ? stats.buses : [];
+    return BUS_IDS.reduce((accumulator, busId) => {
+      accumulator[busId] = statEntries.find((entry) => entry.bus_id === busId) || {
+        bus_id: busId,
+        message_count: 0,
+        message_rate: 0,
+        uptime_seconds: 0,
+      };
+      return accumulator;
+    }, {});
+  }, [stats]);
+
+  const connectedBusIds = useMemo(
+    () => BUS_IDS.filter((busId) => Boolean(busStatusMap[busId]?.connected)),
+    [busStatusMap]
+  );
+
   useEffect(() => {
-    console.log('[CANExplorer] Device type or devices changed:', { deviceType, devicesCount: devices.length });
-    
-    if (deviceType === 'canable') {
-      const canable = devices.filter(d => d.device_type === 'canable');
-      if (canable.length > 0) {
-        const firstDevice = canable[0];
-        const newChannel = `Device ${firstDevice.index}: ${firstDevice.description}`;
-        console.log('[CANExplorer] Setting CANable channel to:', newChannel);
-        setChannel(newChannel);
+    if (connectedBusIds.length === 0) {
+      return;
+    }
+
+    setSelectedTransmitBusId((currentBusId) => (
+      connectedBusIds.includes(currentBusId) ? currentBusId : connectedBusIds[0]
+    ));
+  }, [connectedBusIds]);
+
+  useEffect(() => {
+    localStorage.setItem('selectedTransmitBusId', selectedTransmitBusId);
+  }, [selectedTransmitBusId]);
+
+  const updateConnectionDraft = useCallback((busId, patch) => {
+    setConnectionDrafts((previousDrafts) => ({
+      ...previousDrafts,
+      [busId]: {
+        ...previousDrafts[busId],
+        ...patch,
+      },
+    }));
+  }, []);
+
+  const getDefaultDraftValues = useCallback((nextDeviceType) => {
+    if (nextDeviceType === 'pcan') {
+      return { channel: pcanDevices[0]?.name || 'USB1' };
+    }
+
+    if (nextDeviceType === 'canable') {
+      const firstCanable = canableDevices[0];
+      return {
+        channel: firstCanable
+          ? `Device ${firstCanable.index}: ${firstCanable.description}`
+          : 'Device 0',
+      };
+    }
+
+    if (nextDeviceType === 'bluetooth') {
+      return {
+        bluetoothAddress: bluetoothDevices[0]?.name || '',
+      };
+    }
+
+    return {};
+  }, [bluetoothDevices, canableDevices, pcanDevices]);
+
+  const handleBusDeviceTypeChange = useCallback((busId, nextDeviceType) => {
+    updateConnectionDraft(busId, {
+      deviceType: nextDeviceType,
+      ...getDefaultDraftValues(nextDeviceType),
+    });
+  }, [getDefaultDraftValues, updateConnectionDraft]);
+
+  const resolveChannelForDraft = useCallback((draft) => {
+    let channelToSend = draft.channel;
+
+    if (draft.deviceType === 'network') {
+      return `${draft.networkHost}:${draft.networkPort}`;
+    }
+
+    if (draft.deviceType === 'bluetooth') {
+      return `${draft.bluetoothAddress}:${draft.bluetoothChannel}`;
+    }
+
+    if (draft.deviceType === 'canable') {
+      if (typeof draft.channel === 'string' && draft.channel.startsWith('Device ')) {
+        const parts = draft.channel.split(':')[0].split(' ');
+        channelToSend = parts[1];
+      } else {
+        channelToSend = String(draft.channel).replace(/\D/g, '');
       }
-    } else if (deviceType === 'pcan') {
-      const pcan = devices.filter(d => d.device_type === 'pcan');
-      if (pcan.length > 0) {
-        console.log('[CANExplorer] Setting PCAN channel to:', pcan[0].name);
-        setChannel(pcan[0].name);
+
+      if (!channelToSend) {
+        throw new Error('Invalid CANable channel. Please select a device.');
       }
     }
-    // Network device uses host:port fields, no channel selection needed
-  }, [devices, deviceType]);
+
+    return channelToSend;
+  }, []);
+
+  const handleTransmitSendMessage = useCallback((canId, data, isExtended, isRemote = false) => {
+    if (!simulationActive && !busStatusMap[selectedTransmitBusId]?.connected) {
+      alert(`Select a connected target bus before sending. Current target: ${getBusLabel(selectedTransmitBusId)}.`);
+      return false;
+    }
+
+    return onSendMessage(canId, data, isExtended, isRemote, selectedTransmitBusId);
+  }, [busStatusMap, onSendMessage, selectedTransmitBusId, simulationActive]);
+
+  const scopedChildren = useMemo(() => React.Children.map(children, (child) => {
+    if (!React.isValidElement(child)) {
+      return child;
+    }
+
+    return React.cloneElement(child, {
+      onSendMessage: handleTransmitSendMessage,
+      transmitBusId: selectedTransmitBusId,
+    });
+  }), [children, handleTransmitSendMessage, selectedTransmitBusId]);
 
   // Messages are already aggregated by App.js with count and cycleTime
   // Filter and sort them
@@ -234,8 +369,9 @@ function CANExplorer({
         const idHex = msg.id.toString(16).toLowerCase();
         const dataHex = msg.data.map(b => b.toString(16).padStart(2, '0')).join('').toLowerCase();
         const messageName = msg.decoded?.message_name?.toLowerCase() || '';
+        const busLabel = getBusLabel(msg.bus_id).toLowerCase();
         
-        return idHex.includes(filter) || dataHex.includes(filter) || messageName.includes(filter);
+        return idHex.includes(filter) || dataHex.includes(filter) || messageName.includes(filter) || busLabel.includes(filter);
       });
     }
     
@@ -302,14 +438,12 @@ function CANExplorer({
       ];
 
       if (hasSignals) {
-        // Format signals as "name=value unit; name2=value2 unit2"
-        // Handles both network driver format (direct value) and local decoding format (object with value/unit)
-        const signalsStr = msg.decoded?.signals 
+        const signalsStr = msg.decoded?.signals
           ? Object.entries(msg.decoded.signals)
-              .map(([name, info]) => {
-                const isObject = typeof info === 'object' && info !== null && !Array.isArray(info);
-                const value = isObject ? info.value : info;
-                const unit = isObject && info.unit ? ` ${info.unit}` : '';
+              .map(([name, signal]) => {
+                const isObject = typeof signal === 'object' && signal !== null;
+                const value = isObject ? signal.value : signal;
+                const unit = isObject && signal.unit ? ` ${signal.unit}` : '';
                 return `${name}=${value}${unit}`;
               })
               .join('; ')
@@ -320,12 +454,10 @@ function CANExplorer({
       return row;
     });
 
-    // Create CSV string
     const csvContent = [
       headers.join(','),
       ...rows.map(row => row.map(cell => {
-        // Escape cells that contain commas, quotes, or newlines
-        const str = String(cell);
+        const str = String(cell ?? '');
         if (str.includes(',') || str.includes('"') || str.includes('\n')) {
           return `"${str.replace(/"/g, '""')}"`;
         }
@@ -333,12 +465,11 @@ function CANExplorer({
       }).join(','))
     ].join('\n');
 
-    // Create and trigger download
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `can_messages_${new Date().toISOString().slice(0, 19).replace(/[:-]/g, '')}.csv`;
+    link.download = `can_messages_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -588,9 +719,10 @@ function CANExplorer({
   }, [contextMenu.show]);
 
   const addIsolatedId = (id) => {
+    const isolationKey = typeof id === 'string' ? id : getMessageIdentityKey(id);
     setIsolatedIds(prev => {
       const newSet = new Set(prev);
-      newSet.add(id);
+      newSet.add(isolationKey);
       return newSet;
     });
     setIsolationPanelOpen(true);
@@ -598,14 +730,18 @@ function CANExplorer({
   };
 
   const removeIsolatedId = (id) => {
+    const isolationKey = typeof id === 'string' ? id : getMessageIdentityKey(id);
     setIsolatedIds(prev => {
       const newSet = new Set(prev);
-      newSet.delete(id);
+      newSet.delete(isolationKey);
       return newSet;
     });
-    // Also remove messages for this ID
-    isolatedMessagesRef.current = isolatedMessagesRef.current.filter(m => m.id !== id);
-    setIsolatedMessages(prev => prev.filter(m => m.id !== id));
+    isolatedMessagesRef.current = isolatedMessagesRef.current.filter(
+      (message) => message.isCheckpoint || getMessageIdentityKey(message) !== isolationKey
+    );
+    setIsolatedMessages((previousMessages) => previousMessages.filter(
+      (message) => message.isCheckpoint || getMessageIdentityKey(message) !== isolationKey
+    ));
   };
 
   const clearIsolatedMessages = () => {
@@ -642,10 +778,11 @@ function CANExplorer({
     // Apply duplicate filtering if hideDuplicates is enabled (same logic as display)
     if (hideDuplicates) {
       messagesToExport = messagesToExport.filter((msg, index, arr) => {
+        const identityKey = getMessageIdentityKey(msg);
         // Find previous message with the SAME CAN ID
         let prevMsgSameId = null;
         for (let i = index - 1; i >= 0; i--) {
-          if (arr[i].id === msg.id) {
+          if (getMessageIdentityKey(arr[i]) === identityKey) {
             prevMsgSameId = arr[i];
             break;
           }
@@ -779,20 +916,12 @@ function CANExplorer({
     return changed;
   };
 
-  // Group isolated messages by ID for the full-screen view
-  const groupedIsolatedMessages = useMemo(() => {
-    const groups = new Map();
-    isolatedMessages.forEach(msg => {
-      if (!groups.has(msg.id)) {
-        groups.set(msg.id, []);
-      }
-      groups.get(msg.id).push(msg);
-    });
-    return groups;
-  }, [isolatedMessages]);
+  const handleConnectClick = async (busId) => {
+    const draft = connectionDrafts[busId];
+    const busStatus = busStatusMap[busId] || {};
+    const slotConnected = Boolean(busStatus.connected);
 
-  const handleConnectClick = async () => {
-    console.log('[CANExplorer] Connect button clicked:', { connected, deviceType, channel, baudrate });
+    console.log('[CANExplorer] Connect button clicked:', { busId, slotConnected, draft });
 
     if (simulationActive) {
       alert('Stop Test Mode before connecting or disconnecting hardware.');
@@ -800,47 +929,14 @@ function CANExplorer({
     }
     
     try {
-      if (connected) {
-        console.log('[CANExplorer] Attempting to disconnect...');
-        await onDisconnect();
+      if (slotConnected) {
+        console.log('[CANExplorer] Attempting to disconnect...', busId);
+        await onDisconnect(busId);
       } else {
-        console.log('[CANExplorer] Attempting to connect...');
-        
-        // Handle channel based on device type
-        let channelToSend = channel;
-        
-        if (deviceType === 'network') {
-          // Network device - combine host and port
-          channelToSend = `${networkHost}:${networkPort}`;
-          console.log('[CANExplorer] Network channel:', channelToSend);
-        } else if (deviceType === 'bluetooth') {
-          // Bluetooth device - combine address and RFCOMM channel
-          channelToSend = `${bluetoothAddress}:${bluetoothChannel}`;
-          console.log('[CANExplorer] Bluetooth channel:', channelToSend);
-        } else if (deviceType === 'canable') {
-          // For CANable, extract device index from "Device X: Description" format
-          if (typeof channel === 'string' && channel.startsWith('Device ')) {
-            try {
-              const parts = channel.split(':')[0].split(' ');
-              channelToSend = parts[1]; // Extract just the number
-              console.log('[CANExplorer] Parsed CANable channel:', channelToSend);
-            } catch (e) {
-              console.error('[CANExplorer] Failed to parse CANable channel:', e);
-              alert('Invalid channel format. Please select a device.');
-              return;
-            }
-          } else {
-            // Extract digits only
-            channelToSend = channel.replace(/\D/g, '');
-            if (!channelToSend) {
-              alert('Invalid channel. Please select a CANable device.');
-              return;
-            }
-          }
-        }
-        
-        console.log('[CANExplorer] Connecting with:', { deviceType, channelToSend, baudrate });
-        const result = await onConnect(deviceType, channelToSend, baudrate);
+        console.log('[CANExplorer] Attempting to connect...', busId);
+        const channelToSend = resolveChannelForDraft(draft);
+        console.log('[CANExplorer] Connecting with:', { busId, channelToSend, baudrate: draft.baudrate });
+        const result = await onConnect(busId, draft.deviceType, channelToSend, draft.baudrate);
         console.log('[CANExplorer] Connection result:', result);
       }
     } catch (error) {
@@ -867,6 +963,192 @@ function CANExplorer({
     const mins = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
     return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const renderConnectionSlot = (busId) => {
+    const draft = connectionDrafts[busId];
+    const busStatus = busStatusMap[busId] || {};
+    const busStatistics = busStatsMap[busId] || {};
+    const slotConnected = Boolean(busStatus.connected);
+    const slotBusy = slotConnected || busStatus.status === 'Reconnecting';
+    const toneClass = getBusToneClass(busId);
+
+    return (
+      <div key={busId} className={`bus-connection-card ${toneClass} ${slotBusy ? 'connected' : ''}`}>
+        <div className="bus-connection-header">
+          <span className={`bus-pill ${toneClass}`}>{getBusLabel(busId)}</span>
+          <span className={`bus-connection-state ${(busStatus.status || 'Disconnected').toLowerCase()}`}>
+            {busStatus.status || 'Disconnected'}
+          </span>
+        </div>
+
+        <div className="connection-form">
+          <div className="form-group">
+            <label>Device Type</label>
+            <select
+              value={draft.deviceType}
+              onChange={(event) => handleBusDeviceTypeChange(busId, event.target.value)}
+              disabled={slotBusy || simulationActive}
+            >
+              <option value="pcan">PCAN</option>
+              <option value="canable">CANable / SocketCAN</option>
+              <option value="network">Network</option>
+              <option value="bluetooth">Bluetooth</option>
+            </select>
+          </div>
+
+          {draft.deviceType === 'network' ? (
+            <div className="form-group">
+              <label>Server Address</label>
+              <div className="network-address-input">
+                <input
+                  type="text"
+                  className="network-host"
+                  value={draft.networkHost}
+                  onChange={(event) => updateConnectionDraft(busId, { networkHost: event.target.value })}
+                  placeholder="IP Address"
+                  disabled={slotBusy || simulationActive}
+                />
+                <span className="network-separator">:</span>
+                <input
+                  type="text"
+                  className="network-port"
+                  value={draft.networkPort}
+                  onChange={(event) => updateConnectionDraft(busId, { networkPort: event.target.value })}
+                  placeholder="Port"
+                  disabled={slotBusy || simulationActive}
+                />
+              </div>
+            </div>
+          ) : draft.deviceType === 'bluetooth' ? (
+            <div className="form-group">
+              <label>Bluetooth Address</label>
+              <div className="network-address-input bluetooth-address-input">
+                {bluetoothDevices.length > 0 ? (
+                  <select
+                    value={draft.bluetoothAddress}
+                    onChange={(event) => updateConnectionDraft(busId, { bluetoothAddress: event.target.value })}
+                    disabled={slotBusy || simulationActive}
+                  >
+                    <option value="">-- Select paired device --</option>
+                    {bluetoothDevices.map((device) => (
+                      <option key={`${busId}-${device.name}`} value={device.name}>
+                        {device.description}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={draft.bluetoothAddress}
+                    onChange={(event) => updateConnectionDraft(busId, { bluetoothAddress: event.target.value.toUpperCase() })}
+                    placeholder="XX:XX:XX:XX:XX:XX"
+                    disabled={slotBusy || simulationActive}
+                  />
+                )}
+                <span className="network-separator">Ch:</span>
+                <input
+                  type="number"
+                  value={draft.bluetoothChannel}
+                  onChange={(event) => updateConnectionDraft(busId, { bluetoothChannel: event.target.value })}
+                  min="1"
+                  max="30"
+                  placeholder="1"
+                  disabled={slotBusy || simulationActive}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="form-group">
+              <label>Channel</label>
+              <select
+                value={draft.channel}
+                onChange={(event) => updateConnectionDraft(busId, { channel: event.target.value })}
+                disabled={slotBusy || simulationActive}
+              >
+                {draft.deviceType === 'pcan' ? (
+                  pcanDevices.length > 0 ? (
+                    pcanDevices.map((device) => (
+                      <option key={`${busId}-${device.name}`} value={device.name}>
+                        {device.name} {device.occupied && '(Occupied)'}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="USB1">USB1</option>
+                  )
+                ) : (
+                  canableDevices.length > 0 ? (
+                    canableDevices.map((device) => {
+                      const fullName = `Device ${device.index}: ${device.description}`;
+                      return (
+                        <option key={`${busId}-${device.index}`} value={fullName}>
+                          {fullName}
+                        </option>
+                      );
+                    })
+                  ) : (
+                    <option value="Device 0">Device 0</option>
+                  )
+                )}
+              </select>
+            </div>
+          )}
+
+          <div className="form-group">
+            <label>Baudrate</label>
+            <select
+              value={draft.baudrate}
+              onChange={(event) => updateConnectionDraft(busId, { baudrate: event.target.value })}
+              disabled={slotBusy || simulationActive}
+            >
+              <option value="BAUD_1M">1 Mbit/s</option>
+              <option value="BAUD_500K">500 kbit/s</option>
+              <option value="BAUD_250K">250 kbit/s</option>
+              <option value="BAUD_125K">125 kbit/s</option>
+            </select>
+          </div>
+
+          <button
+            className={`btn btn-block ${slotBusy ? 'btn-danger' : 'btn-primary'}`}
+            onClick={() => handleConnectClick(busId)}
+            disabled={simulationActive}
+          >
+            {slotBusy ? `Disconnect ${getBusLabel(busId)}` : `Connect ${getBusLabel(busId)}`}
+          </button>
+
+          {slotBusy && (
+            <div className="connection-info bus-connection-info">
+              <div className="info-row">
+                <span className="info-label">Device:</span>
+                <span className="info-value">{busStatus.device_type?.toUpperCase() || 'UNKNOWN'}</span>
+              </div>
+              <div className="info-row">
+                <span className="info-label">Channel:</span>
+                <span className="info-value">{busStatus.channel || 'N/A'}</span>
+              </div>
+              <div className="info-row">
+                <span className="info-label">Messages:</span>
+                <span className="info-value">{busStatistics.message_count || 0}</span>
+              </div>
+              <div className="info-row">
+                <span className="info-label">Rate:</span>
+                <span className="info-value">{busStatistics.message_rate || 0} msg/s</span>
+              </div>
+              <div className="info-row">
+                <span className="info-label">Uptime:</span>
+                <span className="info-value">{formatUptime(busStatistics.uptime_seconds || 0)}</span>
+              </div>
+              {busStatus.reason && busStatus.status !== 'Connected' && (
+                <div className="info-row bus-connection-reason">
+                  <span className="info-label">Reason:</span>
+                  <span className="info-value">{busStatus.reason}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -971,174 +1253,11 @@ function CANExplorer({
             {connected ? <Wifi size={18} /> : <WifiOff size={18} />}
             <span>Connection</span>
           </div>
-          
-          {connectionExpanded && <div className="connection-form">
-            <div className="form-group">
-              <label>Device Type</label>
-              <select 
-                value={deviceType} 
-                onChange={(e) => {
-                  const newDeviceType = e.target.value;
-                  setDeviceType(newDeviceType);
-                  
-                  // Update channel when device type changes
-                  if (newDeviceType === 'pcan') {
-                    const pcan = devices.filter(d => d.device_type === 'pcan');
-                    if (pcan.length > 0) {
-                      setChannel(pcan[0].name);
-                    } else {
-                      setChannel('USB1');
-                    }
-                  } else if (newDeviceType === 'canable') {
-                    const canable = devices.filter(d => d.device_type === 'canable');
-                    if (canable.length > 0) {
-                      const firstDevice = canable[0];
-                      setChannel(`Device ${firstDevice.index}: ${firstDevice.description}`);
-                    } else {
-                      setChannel('Device 0');
-                    }
-                  } else if (newDeviceType === 'bluetooth') {
-                    // Check for paired Bluetooth devices - use first one if available
-                    const btDevices = devices.filter(d => d.device_type === 'bluetooth' && d.name !== 'Bluetooth CAN Server');
-                    if (btDevices.length > 0 && btDevices[0].name.includes(':')) {
-                      setBluetoothAddress(btDevices[0].name);
-                    }
-                  }
-                  // Network/Bluetooth devices use their own input fields, no channel needed
-                }}
-                disabled={connected || simulationActive}
-              >
-                <option value="pcan">PCAN-USB</option>
-                <option value="canable">CANable</option>
-                <option value="network">Network</option>
-                <option value="bluetooth">Bluetooth</option>
-              </select>
+
+          {connectionExpanded && <div className="connection-section-content">
+            <div className="bus-connection-grid">
+              {BUS_IDS.map((busId) => renderConnectionSlot(busId))}
             </div>
-
-            {deviceType === 'network' ? (
-              <div className="form-group">
-                <label>Server Address</label>
-                <div className="network-address-input">
-                  <input
-                    type="text"
-                    className="network-host"
-                    value={networkHost}
-                    onChange={(e) => setNetworkHost(e.target.value)}
-                    placeholder="IP Address"
-                    disabled={connected || simulationActive}
-                  />
-                  <span className="network-separator">:</span>
-                  <input
-                    type="text"
-                    className="network-port"
-                    value={networkPort}
-                    onChange={(e) => setNetworkPort(e.target.value)}
-                    placeholder="Port"
-                    disabled={connected || simulationActive}
-                  />
-                </div>
-              </div>
-            ) : deviceType === 'bluetooth' ? (
-              <div className="form-group">
-                <label>Bluetooth Device</label>
-                {(() => {
-                  const btDevices = devices.filter(d => d.device_type === 'bluetooth' && d.name !== 'Bluetooth CAN Server');
-                  return btDevices.length > 0 ? (
-                    <select
-                      className="bluetooth-device-select"
-                      value={bluetoothAddress}
-                      onChange={(e) => setBluetoothAddress(e.target.value)}
-                      disabled={connected || simulationActive}
-                    >
-                      <option value="">-- Select device --</option>
-                      {btDevices.map(device => (
-                        <option key={device.name} value={device.name}>
-                          {device.description}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      type="text"
-                      className="bluetooth-address"
-                      value={bluetoothAddress}
-                      onChange={(e) => setBluetoothAddress(e.target.value.toUpperCase())}
-                      placeholder="XX:XX:XX:XX:XX:XX"
-                      disabled={connected || simulationActive}
-                    />
-                  );
-                })()}
-                <div className="bluetooth-channel-row">
-                  <label>RFCOMM Channel</label>
-                  <input
-                    type="number"
-                    className="bluetooth-channel"
-                    value={bluetoothChannel}
-                    onChange={(e) => setBluetoothChannel(e.target.value)}
-                    min="1"
-                    max="30"
-                    placeholder="1"
-                    disabled={connected || simulationActive}
-                  />
-                </div>
-              </div>
-            ) : (
-              <div className="form-group">
-                <label>Channel</label>
-                <select
-                  value={channel}
-                  onChange={(e) => setChannel(e.target.value)}
-                  disabled={connected || simulationActive}
-                >
-                  {deviceType === 'pcan' ? (
-                    pcanDevices.length > 0 ? (
-                      pcanDevices.map(device => (
-                        <option key={device.name} value={device.name}>
-                          {device.name} {device.occupied && '(Occupied)'}
-                        </option>
-                      ))
-                    ) : (
-                      <option value="USB1">USB1</option>
-                    )
-                  ) : (
-                    canableDevices.length > 0 ? (
-                      canableDevices.map(device => {
-                        const fullName = `Device ${device.index}: ${device.description}`;
-                        return (
-                          <option key={device.index} value={fullName}>
-                            {fullName}
-                          </option>
-                        );
-                      })
-                    ) : (
-                      <option value="Device 0">Device 0</option>
-                    )
-                  )}
-                </select>
-              </div>
-            )}
-
-            <div className="form-group">
-              <label>Baudrate</label>
-              <select
-                value={baudrate}
-                onChange={(e) => setBaudrate(e.target.value)}
-                disabled={connected || simulationActive}
-              >
-                <option value="BAUD_1M">1 Mbit/s</option>
-                <option value="BAUD_500K">500 kbit/s</option>
-                <option value="BAUD_250K">250 kbit/s</option>
-                <option value="BAUD_125K">125 kbit/s</option>
-              </select>
-            </div>
-
-            <button
-              className={`btn btn-block ${connected && !simulationActive ? 'btn-danger' : 'btn-primary'}`}
-              onClick={handleConnectClick}
-              disabled={simulationActive}
-            >
-              {connected && !simulationActive ? 'Disconnect' : 'Connect'}
-            </button>
 
             <button
               className={`btn btn-block ${simulationActive ? 'btn-warning' : 'btn-secondary'}`}
@@ -1163,12 +1282,8 @@ function CANExplorer({
                   <div className="test-mode-pill">TEST MODE ACTIVE</div>
                 )}
                 <div className="info-row">
-                  <span className="info-label">Device:</span>
-                  <span className="info-value">{connectionStatus.device_type?.toUpperCase()}</span>
-                </div>
-                <div className="info-row">
-                  <span className="info-label">Channel:</span>
-                  <span className="info-value">{connectionStatus.channel}</span>
+                  <span className="info-label">Connected Buses:</span>
+                  <span className="info-value">{connectedBusIds.length || (simulationActive ? 1 : 0)}</span>
                 </div>
                 <div className="info-row">
                   <span className="info-label">Messages:</span>
@@ -1185,6 +1300,33 @@ function CANExplorer({
               </div>
             )}
           </div>}
+        </div>
+
+        <div className="sidebar-section">
+          <div className="sidebar-header">
+            <Activity size={18} />
+            <span>Transmit Target</span>
+          </div>
+          <div className="connection-form">
+            <div className="form-group transmit-target-sidebar">
+              <label htmlFor="sidebar-transmit-target-select">Target Bus</label>
+              <select
+                id="sidebar-transmit-target-select"
+                value={selectedTransmitBusId}
+                onChange={(event) => setSelectedTransmitBusId(event.target.value)}
+                disabled={connectedBusIds.length === 0 || simulationActive}
+              >
+                {BUS_IDS.map((busId) => (
+                  <option key={busId} value={busId} disabled={!busStatusMap[busId]?.connected}>
+                    {getBusLabel(busId)} {busStatusMap[busId]?.connected ? '' : '(Disconnected)'}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="transmit-target-hint">
+              Dashboard commands and the transmit list both send on this selected bus.
+            </div>
+          </div>
         </div>
 
         {/* DBC Upload */}
@@ -1362,7 +1504,7 @@ function CANExplorer({
       <div className="can-main-content">
         {children ? (
           // Render custom content (like ThermistorMonitor or CellVoltageMonitor)
-          children
+          scopedChildren
         ) : (
           // Default: Render collapsible sections for Received Messages and Transmit List
           <>
@@ -1442,14 +1584,14 @@ function CANExplorer({
                     </tr>
                   ) : (
                     filteredMessages.map((msg, index) => {
-                      const rowKey = `${msg.id}-${index}`;
+                      const rowKey = getMessageIdentityKey(msg);
                       const isExpanded = expandedRows.has(rowKey);
                       const hasSignals = msg.decoded && Object.keys(msg.decoded.signals).length > 0;
                       
                       return (
                         <React.Fragment key={rowKey}>
                           <tr 
-                            className={`message-row ${hasSignals ? 'clickable' : ''} ${isolatedIds.has(msg.id) ? 'isolated' : ''}`}
+                            className={`message-row ${getBusToneClass(msg.bus_id)} ${hasSignals ? 'clickable' : ''} ${isolatedIds.has(getMessageIdentityKey(msg)) ? 'isolated' : ''}`}
                             onClick={() => hasSignals && toggleRowExpansion(rowKey)}
                             onContextMenu={(e) => handleContextMenu(e, msg)}
                           >
@@ -1461,9 +1603,12 @@ function CANExplorer({
                               )}
                             </td>
                             <td>
-                              <span className="hex-data">
-                                {msg.is_extended ? `0x${msg.id.toString(16).padStart(8, '0').toUpperCase()}` : `0x${msg.id.toString(16).padStart(3, '0').toUpperCase()}`}
-                              </span>
+                              <div className="message-id-cell">
+                                <span className="hex-data">{formatCanId(msg)}</span>
+                                <span className={`message-bus-badge ${getBusToneClass(msg.bus_id)}`}>
+                                  {getBusLabel(msg.bus_id)}
+                                </span>
+                              </div>
                             </td>
                             <td>
                               {msg.decoded ? (
@@ -1559,7 +1704,7 @@ function CANExplorer({
                 <div className="collapsible-content transmit-list-container">
                   <TransmitList 
                     dbcContext={dbcContext}
-                    onSendMessage={onSendMessage}
+                    onSendMessage={handleTransmitSendMessage}
                   />
                 </div>
               )}
@@ -1574,21 +1719,21 @@ function CANExplorer({
           className="context-menu"
           style={{ top: contextMenu.y, left: contextMenu.x }}
         >
-          {!isolatedIds.has(contextMenu.message?.id) ? (
+          {!isolatedIds.has(getMessageIdentityKey(contextMenu.message || { id: 0, is_extended: false, bus_id: 'bus1' })) ? (
             <button 
               className="context-menu-item"
-              onClick={() => addIsolatedId(contextMenu.message?.id)}
+              onClick={() => addIsolatedId(contextMenu.message)}
             >
               <Eye size={14} />
-              <span>Isolate ID: 0x{contextMenu.message?.id.toString(16).toUpperCase()}</span>
+              <span>Isolate {getBusLabel(contextMenu.message?.bus_id)} {formatCanId(contextMenu.message || { id: 0, is_extended: false })}</span>
             </button>
           ) : (
             <button 
               className="context-menu-item"
-              onClick={() => removeIsolatedId(contextMenu.message?.id)}
+              onClick={() => removeIsolatedId(contextMenu.message)}
             >
               <EyeOff size={14} />
-              <span>Stop Isolating 0x{contextMenu.message?.id.toString(16).toUpperCase()}</span>
+              <span>Stop Isolating {getBusLabel(contextMenu.message?.bus_id)} {formatCanId(contextMenu.message || { id: 0, is_extended: false })}</span>
             </button>
           )}
           {isolatedIds.size > 0 && (
@@ -1615,16 +1760,24 @@ function CANExplorer({
             <div className="isolation-header-right">
               {/* Isolated IDs Tags */}
               <div className="isolation-tags-inline">
-                {Array.from(isolatedIds).map(id => {
-                  const msg = messages.find(m => m.id === id);
+                {Array.from(isolatedIds).map(identityKey => {
+                  const parsedKey = parseMessageIdentityKey(identityKey);
+                  const msg = messages.find(m => getMessageIdentityKey(m) === identityKey);
                   const name = msg?.decoded?.message_name;
                   return (
-                    <div key={id} className="isolation-tag">
-                      <span className="isolation-tag-id">0x{id.toString(16).toUpperCase()}</span>
+                    <div key={identityKey} className={`isolation-tag ${getBusToneClass(parsedKey.busId)}`}>
+                      <span className={`message-bus-badge ${getBusToneClass(parsedKey.busId)}`}>
+                        {getBusLabel(parsedKey.busId)}
+                      </span>
+                      <span className="isolation-tag-id">
+                        {parsedKey.isExtended
+                          ? `0x${parsedKey.id.toString(16).padStart(8, '0').toUpperCase()}`
+                          : `0x${parsedKey.id.toString(16).padStart(3, '0').toUpperCase()}`}
+                      </span>
                       {name && <span className="isolation-tag-name">{name}</span>}
                       <button 
                         className="isolation-tag-remove"
-                        onClick={() => removeIsolatedId(id)}
+                        onClick={() => removeIsolatedId(identityKey)}
                         title="Stop isolating this ID"
                       >
                         <X size={12} />
@@ -1740,7 +1893,7 @@ function CANExplorer({
                   // Find previous non-checkpoint message with the SAME CAN ID for change/duplicate detection
                   let prevMsgSameId = null;
                   for (let i = index - 1; i >= 0; i--) {
-                    if (!isolatedMessages[i].isCheckpoint && isolatedMessages[i].id === msg.id) {
+                    if (!isolatedMessages[i].isCheckpoint && getMessageIdentityKey(isolatedMessages[i]) === getMessageIdentityKey(msg)) {
                       prevMsgSameId = isolatedMessages[i];
                       break;
                     }
@@ -1783,15 +1936,16 @@ function CANExplorer({
                   return (
                     <div 
                       key={`${msg.id}-${msg.sequenceNum}-${index}`} 
-                      className={`isolation-message-card ${hasChanges ? 'has-changes' : ''}`}
+                      className={`isolation-message-card ${getBusToneClass(msg.bus_id)} ${hasChanges ? 'has-changes' : ''}`}
                     >
                       <div className="isolation-card-header">
                         <div className="isolation-card-meta">
                           <span className="isolation-seq">#{displayIndex}</span>
+                          <span className={`message-bus-badge ${getBusToneClass(msg.bus_id)}`}>
+                            {getBusLabel(msg.bus_id)}
+                          </span>
                           <span className="isolation-id">
-                            {msg.is_extended 
-                              ? `0x${msg.id.toString(16).padStart(8, '0').toUpperCase()}` 
-                              : `0x${msg.id.toString(16).padStart(3, '0').toUpperCase()}`}
+                            {formatCanId(msg)}
                           </span>
                           {msg.decoded?.message_name && (
                             <span className="isolation-name">{msg.decoded.message_name}</span>

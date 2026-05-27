@@ -25,7 +25,7 @@ import atexit
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import uvicorn
 import shutil
 
@@ -103,8 +103,12 @@ class DeviceType(str, Enum):
     BLUETOOTH = "bluetooth"
 
 
+BUS_IDS = ("bus1", "bus2")
+
+
 class ConnectionRequest(BaseModel):
     """Request to connect to a CAN device"""
+    bus_id: Optional[str] = None
     device_type: DeviceType
     channel: Union[str, int]  # Channel name for PCAN or device index for CANable
     baudrate: str  # e.g., "BAUD_500K"
@@ -114,15 +118,25 @@ class ConnectionResponse(BaseModel):
     """Response from connection attempt"""
     success: bool
     message: str
+    bus_id: Optional[str] = None
+    connected_bus_count: int = 0
     device_type: Optional[str] = None
     channel: Optional[Union[str, int]] = None
     baudrate: Optional[str] = None
+
+
+class DisconnectionRequest(BaseModel):
+    """Request to disconnect one bus or all buses."""
+    bus_id: Optional[str] = None
 
 
 class DisconnectionResponse(BaseModel):
     """Response from disconnection attempt"""
     success: bool
     message: str
+    bus_id: Optional[str] = None
+    disconnected_bus_ids: List[str] = Field(default_factory=list)
+    connected_bus_count: int = 0
 
 
 class DeviceInfo(BaseModel):
@@ -142,18 +156,37 @@ class DeviceListResponse(BaseModel):
     devices: List[DeviceInfo]
 
 
-class BusStatusResponse(BaseModel):
-    """Current bus status information"""
+class BusConnectionInfo(BaseModel):
+    """Current per-bus connection state."""
+    bus_id: str
     connected: bool
     device_type: Optional[str] = None
     channel: Optional[Union[str, int]] = None
     baudrate: Optional[str] = None
     status: Optional[str] = None
     interface: Optional[str] = None
+    reason: Optional[str] = None
+    message_count: int = 0
+    uptime_seconds: float = 0
+    message_rate: float = 0
+
+
+class BusStatusResponse(BaseModel):
+    """Current bus status information"""
+    connected: bool
+    connected_bus_count: int = 0
+    primary_bus_id: Optional[str] = None
+    device_type: Optional[str] = None
+    channel: Optional[Union[str, int]] = None
+    baudrate: Optional[str] = None
+    status: Optional[str] = None
+    interface: Optional[str] = None
+    buses: List[BusConnectionInfo] = Field(default_factory=list)
 
 
 class CANMessageRequest(BaseModel):
     """Request to send a CAN message"""
+    bus_id: Optional[str] = None
     can_id: int
     data: List[int]  # List of bytes (0-255)
     is_extended: bool = False
@@ -164,6 +197,7 @@ class CANMessageResponse(BaseModel):
     """Response after sending a CAN message"""
     success: bool
     message: str
+    bus_id: Optional[str] = None
 
 
 class CANMessageData(BaseModel):
@@ -299,6 +333,10 @@ class CANBackend:
     """Backend state management for CAN communication"""
     
     def __init__(self):
+        self.bus_connections: Dict[str, Dict[str, Any]] = {
+            bus_id: self._build_empty_bus_state(bus_id)
+            for bus_id in BUS_IDS
+        }
         self.driver: Optional[Union[PCANDriver, CANableDriver, 'NetworkCANDriver']] = None
         self.device_type: Optional[DeviceType] = None
         self.is_connected: bool = False
@@ -315,7 +353,6 @@ class CANBackend:
         
         # Event loop for async operations from threads
         self.loop: Optional[asyncio.AbstractEventLoop] = None
-        self.start_time: Optional[datetime] = None
         self.connection_state: str = 'disconnected'
         self.connection_reason: Optional[str] = None
         self._health_monitor_task: Optional[asyncio.Task] = None
@@ -323,6 +360,7 @@ class CANBackend:
         self._simulation_current_task: Optional[asyncio.Task] = None
         self._simulation_active: bool = False
         self._simulation_started_monotonic: Optional[float] = None
+        self._simulation_temp_enabled_dbc_files: set[str] = set()
         self._hvc_test_mode_task: Optional[asyncio.Task] = None
         self._hvc_test_mode_started_monotonic: Optional[float] = None
         self.hvc_test_mode_enabled: bool = False
@@ -342,6 +380,317 @@ class CANBackend:
         self._shutdown_called: bool = False
         self._recovery_in_progress: bool = False
         self._user_requested_disconnect: bool = False
+
+    def _build_empty_bus_state(self, bus_id: str) -> Dict[str, Any]:
+        """Create one empty hardware bus slot."""
+        return {
+            'bus_id': bus_id,
+            'connected': False,
+            'driver': None,
+            'device_type': None,
+            'channel': None,
+            'baudrate': None,
+            'interface': None,
+            'connection_state': 'disconnected',
+            'connection_reason': None,
+            'message_count': 0,
+            'start_time': None,
+            'recovery_in_progress': False,
+            'user_requested_disconnect': False,
+            'request_key': None,
+        }
+
+    def _normalize_bus_id(self, bus_id: str) -> str:
+        """Validate and normalize a fixed bus slot identifier."""
+        normalized = str(bus_id).strip().lower()
+        if normalized not in BUS_IDS:
+            raise ValueError(f"Invalid bus_id '{bus_id}'. Valid values: {', '.join(BUS_IDS)}")
+        return normalized
+
+    def _get_bus_slot(self, bus_id: str) -> Dict[str, Any]:
+        """Return the mutable state for one bus slot."""
+        return self.bus_connections[self._normalize_bus_id(bus_id)]
+
+    def _get_connected_bus_ids(self) -> List[str]:
+        """Return connected hardware bus ids in display order."""
+        return [bus_id for bus_id in BUS_IDS if self.bus_connections[bus_id]['connected']]
+
+    def _get_claimed_bus_ids(self) -> List[str]:
+        """Return bus ids that currently own driver state."""
+        return [bus_id for bus_id in BUS_IDS if self.bus_connections[bus_id]['driver'] is not None]
+
+    def _get_recovering_bus_ids(self) -> List[str]:
+        """Return bus ids currently trying to recover hardware."""
+        return [
+            bus_id for bus_id in BUS_IDS
+            if self.bus_connections[bus_id]['recovery_in_progress']
+        ]
+
+    def get_connected_bus_count(self) -> int:
+        """Return the number of active hardware buses."""
+        return len(self._get_connected_bus_ids())
+
+    def _get_primary_bus_id(self) -> Optional[str]:
+        """Return the primary connected or recovering bus id."""
+        connected_bus_ids = self._get_connected_bus_ids()
+        if connected_bus_ids:
+            return connected_bus_ids[0]
+
+        recovering_bus_ids = self._get_recovering_bus_ids()
+        if recovering_bus_ids:
+            return recovering_bus_ids[0]
+
+        claimed_bus_ids = self._get_claimed_bus_ids()
+        return claimed_bus_ids[0] if claimed_bus_ids else None
+
+    def _allocate_bus_id(self) -> Optional[str]:
+        """Pick the first free bus slot."""
+        for bus_id in BUS_IDS:
+            slot = self.bus_connections[bus_id]
+            if not slot['driver'] and not slot['connected'] and not slot['recovery_in_progress']:
+                return bus_id
+        return None
+
+    def _resolve_connect_bus_id(self, bus_id: Optional[str]) -> str:
+        """Resolve which bus slot should be used for a new connection."""
+        if bus_id is None:
+            allocated_bus_id = self._allocate_bus_id()
+            if allocated_bus_id is None:
+                raise ValueError("Both CAN bus slots are already in use")
+            return allocated_bus_id
+
+        normalized_bus_id = self._normalize_bus_id(bus_id)
+        slot = self.bus_connections[normalized_bus_id]
+        if slot['driver'] or slot['connected'] or slot['recovery_in_progress']:
+            raise ValueError(f"{normalized_bus_id} is already connected")
+        return normalized_bus_id
+
+    def _resolve_active_bus_id(self, bus_id: Optional[str], *, allow_recovering: bool = False) -> str:
+        """Resolve a target bus for send/disconnect operations."""
+        if bus_id is not None:
+            normalized_bus_id = self._normalize_bus_id(bus_id)
+            slot = self.bus_connections[normalized_bus_id]
+            if allow_recovering:
+                if slot['driver'] is None and not slot['recovery_in_progress']:
+                    raise ValueError(f"{normalized_bus_id} is not active")
+            elif not slot['connected'] or slot['driver'] is None:
+                raise ValueError(f"{normalized_bus_id} is not connected")
+            return normalized_bus_id
+
+        connected_bus_ids = self._get_connected_bus_ids()
+        if len(connected_bus_ids) == 1:
+            return connected_bus_ids[0]
+        if len(connected_bus_ids) > 1:
+            raise ValueError("Multiple CAN buses are connected. Specify bus_id.")
+
+        if allow_recovering:
+            claimed_bus_ids = self._get_claimed_bus_ids()
+            if len(claimed_bus_ids) == 1:
+                return claimed_bus_ids[0]
+            if len(claimed_bus_ids) > 1:
+                raise ValueError("Multiple CAN buses are active. Specify bus_id.")
+
+        raise ValueError("Not connected to any CAN device")
+
+    def resolve_target_bus_id(self, bus_id: Optional[str]) -> str:
+        """Public helper for routes that need a unique connected bus."""
+        return self._resolve_active_bus_id(bus_id)
+
+    def _build_connection_request_key(self, device_type: DeviceType, channel: Union[str, int]) -> str:
+        """Build a stable key for duplicate connection detection."""
+        normalized_channel = str(channel).strip().lower()
+        return f"{device_type.value}:{normalized_channel}"
+
+    def _assert_bus_request_available(self, bus_id: str, device_type: DeviceType, channel: Union[str, int]):
+        """Reject attempts to connect two slots to the same requested target."""
+        requested_key = self._build_connection_request_key(device_type, channel)
+        for other_bus_id in BUS_IDS:
+            if other_bus_id == bus_id:
+                continue
+
+            other_slot = self.bus_connections[other_bus_id]
+            if other_slot['driver'] is None:
+                continue
+
+            if other_slot.get('request_key') == requested_key:
+                raise ValueError(
+                    f"{other_bus_id} already uses that CAN device or SocketCAN interface"
+                )
+
+    def _read_driver_status(self, bus_id: str) -> Dict[str, Any]:
+        """Return one driver's status and refresh cached slot metadata."""
+        slot = self._get_bus_slot(bus_id)
+        driver = slot['driver']
+        if driver is None:
+            return {}
+
+        try:
+            status = driver.get_bus_status()
+        except Exception as e:
+            print(f"[Status] Failed to read bus status for {bus_id}: {e}")
+            return {}
+
+        channel = status.get('channel')
+        if channel not in (None, ''):
+            slot['channel'] = channel
+
+        interface = status.get('interface')
+        if interface not in (None, ''):
+            slot['interface'] = interface
+
+        baudrate = status.get('baudrate')
+        if baudrate not in (None, ''):
+            slot['baudrate'] = baudrate
+
+        return status
+
+    def _assert_unique_resolved_target(self, bus_id: str):
+        """Reject duplicate resolved device/interface assignments across slots."""
+        slot = self._get_bus_slot(bus_id)
+        for other_bus_id in BUS_IDS:
+            if other_bus_id == bus_id:
+                continue
+
+            other_slot = self.bus_connections[other_bus_id]
+            if other_slot['driver'] is None:
+                continue
+
+            same_request = bool(slot.get('request_key')) and slot.get('request_key') == other_slot.get('request_key')
+            same_resolved = (
+                slot.get('device_type') == other_slot.get('device_type')
+                and slot.get('interface') not in (None, '')
+                and slot.get('interface') == other_slot.get('interface')
+                and str(slot.get('channel')) == str(other_slot.get('channel'))
+            )
+            if same_request or same_resolved:
+                raise ValueError(
+                    f"{bus_id} conflicts with {other_bus_id}; choose a different CAN device or SocketCAN interface"
+                )
+
+    def _reset_bus_slot(self, bus_id: str, reason: Optional[str] = None):
+        """Reset a bus slot to its disconnected state."""
+        normalized_bus_id = self._normalize_bus_id(bus_id)
+        self.bus_connections[normalized_bus_id] = self._build_empty_bus_state(normalized_bus_id)
+        self.bus_connections[normalized_bus_id]['connection_reason'] = reason
+        self._sync_legacy_connection_state()
+
+    def _sync_legacy_connection_state(self):
+        """Keep legacy aggregate fields aligned with the multi-bus model."""
+        if self._simulation_active:
+            return
+
+        connected_bus_ids = self._get_connected_bus_ids()
+        claimed_bus_ids = self._get_claimed_bus_ids()
+        recovering_bus_ids = self._get_recovering_bus_ids()
+        primary_bus_id = self._get_primary_bus_id()
+
+        self.is_connected = bool(connected_bus_ids)
+        self._recovery_in_progress = bool(recovering_bus_ids)
+        self._user_requested_disconnect = bool(claimed_bus_ids) and all(
+            self.bus_connections[bus_id]['user_requested_disconnect']
+            for bus_id in claimed_bus_ids
+        ) if claimed_bus_ids else False
+        self.message_count = sum(
+            int(self.bus_connections[bus_id]['message_count'])
+            for bus_id in BUS_IDS
+        )
+
+        if primary_bus_id is None:
+            self.driver = None
+            self.device_type = None
+            self.start_time = None
+            self.connection_state = 'disconnected'
+            self.connection_reason = None
+            return
+
+        primary_slot = self.bus_connections[primary_bus_id]
+        self.driver = primary_slot['driver']
+        self.device_type = primary_slot['device_type']
+        self.start_time = primary_slot['start_time']
+        self.connection_state = (
+            'connected' if connected_bus_ids
+            else 'reconnecting' if recovering_bus_ids
+            else primary_slot['connection_state']
+        )
+        self.connection_reason = primary_slot['connection_reason']
+
+    def _build_bus_status_entry(self, bus_id: str) -> Dict[str, Any]:
+        """Build one frontend-facing bus status payload."""
+        slot = self._get_bus_slot(bus_id)
+        driver_status = self._read_driver_status(bus_id) if slot['driver'] else {}
+        uptime = 0.0
+        if slot['start_time']:
+            uptime = max(0.0, (datetime.now() - slot['start_time']).total_seconds())
+        message_rate = (slot['message_count'] / uptime) if uptime > 0 else 0.0
+
+        channel = driver_status.get('channel', slot['channel'])
+        interface = driver_status.get('interface', slot['interface'])
+        baudrate = driver_status.get('baudrate', slot['baudrate'])
+
+        return {
+            'bus_id': bus_id,
+            'connected': bool(slot['connected']),
+            'device_type': slot['device_type'].value if slot['device_type'] else None,
+            'channel': channel,
+            'baudrate': baudrate,
+            'status': slot['connection_state'].title(),
+            'interface': interface,
+            'reason': slot['connection_reason'],
+            'message_count': int(slot['message_count']),
+            'uptime_seconds': uptime,
+            'message_rate': round(message_rate, 2),
+        }
+
+    def _build_connection_status_payload(
+        self,
+        event_status: Optional[str] = None,
+        reason: Optional[str] = None,
+        bus_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Build a websocket connection-status payload with aggregate and per-bus state."""
+        snapshot = self.get_bus_status()
+        payload = {
+            "type": "connection_status",
+            "status": (snapshot.get('status') or 'Disconnected').lower(),
+            "timestamp": datetime.now().isoformat(),
+            "connected": snapshot.get('connected', False),
+            "connected_bus_count": snapshot.get('connected_bus_count', 0),
+            "primary_bus_id": snapshot.get('primary_bus_id'),
+            "buses": snapshot.get('buses', []),
+        }
+
+        if reason is not None:
+            payload['reason'] = reason
+        elif self.connection_reason is not None:
+            payload['reason'] = self.connection_reason
+
+        if event_status is not None:
+            payload['event_status'] = event_status
+
+        if bus_id is not None:
+            normalized_bus_id = self._normalize_bus_id(bus_id)
+            payload['bus_id'] = normalized_bus_id
+            bus_snapshot = next(
+                (bus for bus in snapshot.get('buses', []) if bus.get('bus_id') == normalized_bus_id),
+                None
+            )
+            if bus_snapshot is not None:
+                payload['bus_status'] = (bus_snapshot.get('status') or 'Disconnected').lower()
+
+        return payload
+
+    def _increment_message_count(self, bus_id: Optional[str] = None) -> int:
+        """Increment aggregate or per-bus message counters."""
+        if bus_id is not None and bus_id in self.bus_connections:
+            slot = self.bus_connections[bus_id]
+            slot['message_count'] += 1
+            self.message_count += 1
+            if not self._simulation_active:
+                self._sync_legacy_connection_state()
+            return int(slot['message_count'])
+
+        self.message_count += 1
+        return self.message_count
 
     def _normalize_dbc_filename(self, filename: str) -> str:
         """Return a safe filename without path segments."""
@@ -498,21 +847,28 @@ class CANBackend:
             except Exception as e:
                 print(f"[DBC] Failed to persist DBC config: {e}")
 
-    def _upload_effective_dbc_to_remote(self):
+    def _upload_effective_dbc_to_remote(self, bus_id: Optional[str] = None):
         """Upload the effective DBC to remote decoders when required."""
-        if self.device_type not in (DeviceType.NETWORK, DeviceType.BLUETOOTH) or not self.driver:
+        if not self.dbc_file_path:
             return
 
-        if not self.dbc_file_path or not hasattr(self.driver, 'upload_dbc'):
-            return
+        target_bus_ids = [self._normalize_bus_id(bus_id)] if bus_id else BUS_IDS
+        for target_bus_id in target_bus_ids:
+            slot = self.bus_connections[target_bus_id]
+            driver = slot['driver']
+            if slot['device_type'] not in (DeviceType.NETWORK, DeviceType.BLUETOOTH) or not driver:
+                continue
 
-        try:
-            if self.driver.upload_dbc(self.dbc_file_path):
-                print(f"[DBC] Uploaded effective DBC to remote server: {self.dbc_file_path}")
-            else:
-                print("[DBC] Warning: Failed to upload effective DBC to remote server")
-        except Exception as e:
-            print(f"[DBC] Warning: Remote upload failed: {e}")
+            if not hasattr(driver, 'upload_dbc'):
+                continue
+
+            try:
+                if driver.upload_dbc(self.dbc_file_path):
+                    print(f"[DBC] Uploaded effective DBC to remote server for {target_bus_id}: {self.dbc_file_path}")
+                else:
+                    print(f"[DBC] Warning: Failed to upload effective DBC to remote server for {target_bus_id}")
+            except Exception as e:
+                print(f"[DBC] Warning: Remote upload failed for {target_bus_id}: {e}")
 
     def get_active_dbc_signature(self) -> Optional[str]:
         """Return a stable identifier for the enabled DBC set and order."""
@@ -646,19 +1002,21 @@ class CANBackend:
             print(f"DBC load error: {e}")
             return False
 
-    def _is_driver_healthy(self) -> bool:
-        """Check current driver health."""
-        if not self.is_connected or not self.driver:
+    def _is_driver_healthy(self, bus_id: str) -> bool:
+        """Check current driver health for one bus slot."""
+        slot = self._get_bus_slot(bus_id)
+        driver = slot['driver']
+        if not slot['connected'] or not driver:
             return False
 
         try:
-            if hasattr(self.driver, 'health_check'):
-                return bool(self.driver.health_check())
+            if hasattr(driver, 'health_check'):
+                return bool(driver.health_check())
 
-            status = self.driver.get_bus_status()
+            status = driver.get_bus_status()
             return bool(status.get('connected', False))
         except Exception as e:
-            print(f"[Health] Driver health check failed: {e}")
+            print(f"[Health] Driver health check failed for {bus_id}: {e}")
             return False
 
     async def _run_health_monitor(self):
@@ -668,15 +1026,19 @@ class CANBackend:
             while not self._shutdown_called:
                 await asyncio.sleep(5.0)
 
-                if self._shutdown_called or self._user_requested_disconnect:
+                if self._shutdown_called:
                     break
 
-                if not self.is_connected or not self.driver or self._recovery_in_progress:
-                    continue
+                for bus_id in BUS_IDS:
+                    slot = self.bus_connections[bus_id]
+                    if slot['user_requested_disconnect']:
+                        continue
+                    if not slot['connected'] or not slot['driver'] or slot['recovery_in_progress']:
+                        continue
 
-                healthy = await asyncio.to_thread(self._is_driver_healthy)
-                if not healthy:
-                    await self._handle_connection_loss("driver_health_check_failed")
+                    healthy = await asyncio.to_thread(self._is_driver_healthy, bus_id)
+                    if not healthy:
+                        await self._handle_connection_loss(bus_id, "driver_health_check_failed")
         except asyncio.CancelledError:
             pass
         finally:
@@ -697,72 +1059,84 @@ class CANBackend:
                 pass
         self._health_monitor_task = None
 
-    async def broadcast_connection_status(self, status: str, reason: Optional[str] = None):
+    async def broadcast_connection_status(
+        self,
+        status: Optional[str] = None,
+        reason: Optional[str] = None,
+        bus_id: Optional[str] = None
+    ):
         """Broadcast connection status updates to all websocket clients."""
-        payload = {
-            "type": "connection_status",
-            "status": status,
-            "timestamp": datetime.now().isoformat()
-        }
-        if reason:
-            payload["reason"] = reason
-        await self.broadcast_message(payload)
+        await self.broadcast_message(
+            self._build_connection_status_payload(status, reason, bus_id)
+        )
 
-    async def _handle_connection_loss(self, reason: str):
+    async def _handle_connection_loss(self, bus_id: str, reason: str):
         """Retry reconnection indefinitely until hardware returns or user disconnects."""
-        if self._recovery_in_progress or not self.is_connected or not self.driver:
+        slot = self._get_bus_slot(bus_id)
+        if slot['recovery_in_progress'] or not slot['driver']:
             return
 
-        self._recovery_in_progress = True
-        self.connection_state = 'reconnecting'
-        self.connection_reason = reason
-        await self.broadcast_connection_status('reconnecting', reason)
+        slot['connected'] = False
+        slot['recovery_in_progress'] = True
+        slot['connection_state'] = 'reconnecting'
+        slot['connection_reason'] = reason
+        self._sync_legacy_connection_state()
+        await self.broadcast_connection_status('reconnecting', reason, bus_id)
 
         attempt = 0
         max_backoff = 30  # cap at 30 seconds between retries
         try:
-            while not self._shutdown_called and not self._user_requested_disconnect:
+            while not self._shutdown_called and not slot['user_requested_disconnect']:
                 attempt += 1
-                print(f"[Recovery] Attempt {attempt}")
-                success = await asyncio.to_thread(self._attempt_driver_reconnect)
+                print(f"[Recovery] Attempt {attempt} for {bus_id}")
+                success = await asyncio.to_thread(self._attempt_driver_reconnect, bus_id)
                 if success:
-                    self.connection_state = 'connected'
-                    self.connection_reason = 'recovered'
-                    await self.broadcast_connection_status('connected', 'recovered')
-                    print("[Recovery] Connection restored")
+                    slot['connected'] = True
+                    slot['connection_state'] = 'connected'
+                    slot['connection_reason'] = 'recovered'
+                    self._sync_legacy_connection_state()
+                    await self.broadcast_connection_status('connected', 'recovered', bus_id)
+                    print(f"[Recovery] Connection restored for {bus_id}")
                     return
 
                 backoff = min(2 ** min(attempt - 1, 5), max_backoff)
-                print(f"[Recovery] Next retry in {backoff}s")
+                print(f"[Recovery] Next retry for {bus_id} in {backoff}s")
                 await asyncio.sleep(backoff)
 
             # User pressed disconnect while we were retrying
-            if self._user_requested_disconnect:
-                print("[Recovery] Stopped — user requested disconnect")
+            if slot['user_requested_disconnect']:
+                print(f"[Recovery] Stopped for {bus_id} — user requested disconnect")
         finally:
-            self._recovery_in_progress = False
+            slot['recovery_in_progress'] = False
+            self._sync_legacy_connection_state()
 
-    def _attempt_driver_reconnect(self) -> bool:
+    def _attempt_driver_reconnect(self, bus_id: str) -> bool:
         """Reconnect using driver-provided reconnect hook."""
-        if not self.driver or not hasattr(self.driver, 'reconnect'):
+        slot = self._get_bus_slot(bus_id)
+        driver = slot['driver']
+        if not driver or not hasattr(driver, 'reconnect'):
             return False
 
         try:
-            success = bool(self.driver.reconnect())
+            success = bool(driver.reconnect())
             if not success:
                 return False
 
-            if hasattr(self.driver, 'start_receive_thread'):
+            if hasattr(driver, 'start_receive_thread'):
                 try:
-                    self.driver.start_receive_thread(self._on_message_received)
+                    driver.start_receive_thread(self._make_message_callback(bus_id))
                 except Exception as e:
-                    print(f"[Recovery] Warning starting receive thread: {e}")
+                    print(f"[Recovery] Warning starting receive thread for {bus_id}: {e}")
 
-            self.is_connected = True
-            self.start_time = datetime.now()
+            slot['connected'] = True
+            slot['connection_state'] = 'connected'
+            slot['connection_reason'] = None
+            slot['start_time'] = datetime.now()
+            self._read_driver_status(bus_id)
+            self._sync_legacy_connection_state()
             return True
         except Exception as e:
-            print(f"[Recovery] Reconnect error: {e}")
+            print(f"[Recovery] Reconnect error for {bus_id}: {e}")
             return False
 
     async def shutdown(self):
@@ -775,7 +1149,7 @@ class CANBackend:
         await self.stop_simulation()
         await self.stop_health_monitor()
 
-        if self.is_connected:
+        if self.is_connected or self._get_claimed_bus_ids():
             await asyncio.to_thread(self.disconnect)
 
         for ws in list(self.active_connections):
@@ -857,24 +1231,33 @@ class CANBackend:
         
         return devices
     
-    def connect(self, device_type: DeviceType, channel: Union[str, int], baudrate: str) -> bool:
+    def connect(
+        self,
+        device_type: DeviceType,
+        channel: Union[str, int],
+        baudrate: str,
+        bus_id: Optional[str] = None
+    ) -> Optional[str]:
         """Connect to a CAN device"""
         if self._simulation_active:
             print("[Connect] Refusing real hardware connect while simulation is active")
-            return False
+            self.connection_reason = "Simulation is active"
+            return None
 
-        if self.is_connected:
-            return False
-
-        self.connection_reason = None
+        target_bus_id = None
+        driver = None
         
         try:
+            target_bus_id = self._resolve_connect_bus_id(bus_id)
+            self._assert_bus_request_available(target_bus_id, device_type, channel)
+            requested_key = self._build_connection_request_key(device_type, channel)
+
             # Create appropriate driver
             if device_type == DeviceType.PCAN:
                 if not PCAN_AVAILABLE:
                     raise Exception("PCAN driver not available")
                 
-                self.driver = PCANDriver()
+                driver = PCANDriver()
 
                 # Accept several PCAN channel formats from clients/UI.
                 if isinstance(channel, int):
@@ -905,8 +1288,8 @@ class CANBackend:
 
                 pcan_baudrate = PCANBaudRate[baudrate]
                 
-                if not self.driver.connect(pcan_channel, pcan_baudrate):
-                    driver_error = getattr(self.driver, 'last_error', None)
+                if not driver.connect(pcan_channel, pcan_baudrate):
+                    driver_error = getattr(driver, 'last_error', None)
                     if driver_error:
                         raise Exception(driver_error)
                     raise Exception(f"Failed to connect PCAN channel {pcan_channel.name}")
@@ -915,7 +1298,7 @@ class CANBackend:
                 if not CANABLE_AVAILABLE:
                     raise Exception("CANable driver not available")
                 
-                self.driver = CANableDriver()
+                driver = CANableDriver()
                 canable_baudrate = CANableBaudRate[baudrate]
                 
                 # Handle both formats: "Device X: Description" or just the index number
@@ -931,8 +1314,8 @@ class CANBackend:
                 else:
                     channel_index = int(channel)
                 
-                if not self.driver.connect(channel_index, canable_baudrate):
-                    return False
+                if not driver.connect(channel_index, canable_baudrate):
+                    raise Exception(f"Failed to connect CANable channel {channel_index}")
             
             elif device_type == DeviceType.NETWORK:
                 if not NETWORK_CAN_AVAILABLE:
@@ -948,15 +1331,15 @@ class CANBackend:
                 # Map baudrate string to NetworkCANBaudRate enum
                 network_baudrate = NetworkCANBaudRate[baudrate]
                 
-                self.driver = NetworkCANDriver(host=host, port=port)
+                driver = NetworkCANDriver(host=host, port=port)
                 
                 # Test connection first
-                if not self.driver.test_connection():
-                    return False
+                if not driver.test_connection():
+                    raise Exception("Failed to reach network CAN server")
                 
                 # Connect with the specified baudrate and auto-connect to server
-                if not self.driver.connect(baudrate=network_baudrate, auto_connect_server=True):
-                    return False
+                if not driver.connect(baudrate=network_baudrate, auto_connect_server=True):
+                    raise Exception("Failed to connect network CAN driver")
             
             elif device_type == DeviceType.BLUETOOTH:
                 if not BLUETOOTH_CAN_AVAILABLE:
@@ -977,125 +1360,346 @@ class CANBackend:
                     except ValueError:
                         rfcomm_channel = 1
                 
-                self.driver = BluetoothCANDriver()
+                driver = BluetoothCANDriver()
                 
                 # Connect to the Bluetooth server
-                if not self.driver.connect(address=bt_address, channel=rfcomm_channel):
-                    return False
+                if not driver.connect(address=bt_address, channel=rfcomm_channel):
+                    raise Exception("Failed to connect Bluetooth CAN driver")
             
             else:
                 raise Exception(f"Unknown device type: {device_type}")
             
             # Start receive thread
-            self.driver.start_receive_thread(self._on_message_received)
-            
-            self.device_type = device_type
-            self.is_connected = True
-            self.connection_state = 'connected'
-            self.connection_reason = None
-            self._user_requested_disconnect = False
-            self.start_time = datetime.now()
-            self.message_count = 0
+            driver.start_receive_thread(self._make_message_callback(target_bus_id))
+
+            slot = self._get_bus_slot(target_bus_id)
+            slot.update({
+                'connected': True,
+                'driver': driver,
+                'device_type': device_type,
+                'channel': channel,
+                'baudrate': baudrate,
+                'interface': None,
+                'connection_state': 'connected',
+                'connection_reason': None,
+                'message_count': 0,
+                'start_time': datetime.now(),
+                'recovery_in_progress': False,
+                'user_requested_disconnect': False,
+                'request_key': requested_key,
+            })
+            self._read_driver_status(target_bus_id)
+            self._assert_unique_resolved_target(target_bus_id)
+            self._sync_legacy_connection_state()
             
             # For Network/Bluetooth drivers, upload the effective DBC if one is active.
-            self._upload_effective_dbc_to_remote()
+            self._upload_effective_dbc_to_remote(target_bus_id)
             
-            return True
+            return target_bus_id
             
         except Exception as e:
             print(f"Connection error: {e}")
             self.connection_reason = str(e)
-            self.driver = None
-            self.device_type = None
-            self.is_connected = False
-            return False
+            if driver:
+                try:
+                    if hasattr(driver, 'stop_receive_thread'):
+                        driver.stop_receive_thread()
+                except Exception:
+                    pass
+                try:
+                    driver.disconnect()
+                except Exception:
+                    pass
+            if target_bus_id is not None:
+                self._reset_bus_slot(target_bus_id, str(e))
+            return None
     
-    def disconnect(self) -> bool:
-        """Disconnect from CAN device"""
-        if not self.is_connected or not self.driver:
+    def _disconnect_bus(self, bus_id: str) -> bool:
+        """Disconnect one bus slot."""
+        slot = self._get_bus_slot(bus_id)
+        driver = slot['driver']
+        if driver is None and not slot['recovery_in_progress']:
             return False
-        
-        device_name = self.device_type.value if self.device_type else "unknown"
-        print(f"[Disconnect] Disconnecting from {device_name}...")
-        
+
+        device_name = slot['device_type'].value if slot['device_type'] else "unknown"
+        print(f"[Disconnect] Disconnecting {bus_id} from {device_name}...")
+
         try:
             # Stop receive thread first if available
-            if hasattr(self.driver, 'stop_receive_thread'):
+            if driver and hasattr(driver, 'stop_receive_thread'):
                 try:
-                    self.driver.stop_receive_thread()
-                    print("[Disconnect] Receive thread stopped")
+                    driver.stop_receive_thread()
+                    print(f"[Disconnect] Receive thread stopped for {bus_id}")
                 except Exception as e:
-                    print(f"[Disconnect] Warning stopping receive thread: {e}")
+                    print(f"[Disconnect] Warning stopping receive thread for {bus_id}: {e}")
             
             # Disconnect from device
-            try:
-                self.driver.disconnect()
-                print("[Disconnect] Driver disconnected")
-            except Exception as e:
-                print(f"[Disconnect] Warning during driver disconnect: {e}")
-            
-            self.driver = None
-            self.is_connected = False
-            self.device_type = None
-            self.connection_state = 'disconnected'
-            self.connection_reason = None
-            print("[Disconnect] Cleanup complete")
+            if driver:
+                try:
+                    driver.disconnect()
+                    print(f"[Disconnect] Driver disconnected for {bus_id}")
+                except Exception as e:
+                    print(f"[Disconnect] Warning during driver disconnect for {bus_id}: {e}")
+
+            self._reset_bus_slot(bus_id)
+            print(f"[Disconnect] Cleanup complete for {bus_id}")
             return True
         except Exception as e:
-            print(f"[Disconnect] Error: {e}")
+            print(f"[Disconnect] Error on {bus_id}: {e}")
             # Force cleanup even on error
-            self.driver = None
-            self.is_connected = False
-            self.device_type = None
-            self.connection_state = 'disconnected'
+            self._reset_bus_slot(bus_id, str(e))
+            return False
+
+    def disconnect(self, bus_id: Optional[str] = None) -> List[str]:
+        """Disconnect one bus or all active buses."""
+        if bus_id is None:
+            target_bus_ids = [
+                current_bus_id for current_bus_id in BUS_IDS
+                if self.bus_connections[current_bus_id]['driver'] is not None
+                or self.bus_connections[current_bus_id]['recovery_in_progress']
+            ]
+        else:
+            normalized_bus_id = self._normalize_bus_id(bus_id)
+            slot = self.bus_connections[normalized_bus_id]
+            if slot['driver'] is None and not slot['recovery_in_progress']:
+                return []
+            target_bus_ids = [normalized_bus_id]
+
+        disconnected_bus_ids = []
+        for target_bus_id in target_bus_ids:
+            self.bus_connections[target_bus_id]['user_requested_disconnect'] = True
+            if self._disconnect_bus(target_bus_id):
+                disconnected_bus_ids.append(target_bus_id)
+
+        self._sync_legacy_connection_state()
+        return disconnected_bus_ids
+    
+    def send_message(
+        self,
+        can_id: int,
+        data: List[int],
+        is_extended: bool = False,
+        is_remote: bool = False,
+        bus_id: Optional[str] = None
+    ) -> bool:
+        """Send a CAN message"""
+        try:
+            target_bus_id = self._resolve_active_bus_id(bus_id)
+        except ValueError as e:
             self.connection_reason = str(e)
             return False
-    
-    def send_message(self, can_id: int, data: List[int], 
-                    is_extended: bool = False, is_remote: bool = False) -> bool:
-        """Send a CAN message"""
-        if not self.is_connected or not self.driver:
+
+        slot = self._get_bus_slot(target_bus_id)
+        driver = slot['driver']
+        if not slot['connected'] or not driver:
+            self.connection_reason = f"{target_bus_id} is not connected"
             return False
         
         try:
             data_bytes = bytes(data)
-            return self.driver.send_message(can_id, data_bytes, is_extended, is_remote)
+            return driver.send_message(can_id, data_bytes, is_extended, is_remote)
         except Exception as e:
             print(f"Send error: {e}")
+            self.connection_reason = str(e)
             return False
+
+    def _build_simulation_bus_status_entry(self, bus_id: str) -> Dict[str, Any]:
+        """Build one frontend-facing bus status payload for synthetic test-mode buses."""
+        slot = self._get_bus_slot(bus_id)
+        uptime = 0.0
+        if slot['start_time']:
+            uptime = max(0.0, (datetime.now() - slot['start_time']).total_seconds())
+
+        message_count = int(slot['message_count'])
+        message_rate = (message_count / uptime) if uptime > 0 else 0.0
+        default_channel = 'bms-fake-data' if bus_id == 'bus1' else 'master-fake-data'
+
+        return {
+            'bus_id': bus_id,
+            'connected': True,
+            'device_type': 'simulation',
+            'channel': slot['channel'] or default_channel,
+            'baudrate': slot['baudrate'] or 'SIM',
+            'status': 'Connected',
+            'interface': slot['interface'] or 'simulation',
+            'reason': slot['connection_reason'] or 'simulation',
+            'message_count': message_count,
+            'uptime_seconds': uptime,
+            'message_rate': round(message_rate, 2),
+        }
+
+    def _configure_simulation_bus_slots(self):
+        """Expose built-in test mode as two active frontend bus slots."""
+        simulation_start = self.start_time or datetime.now()
+        for bus_id, channel in (('bus1', 'bms-fake-data'), ('bus2', 'master-fake-data')):
+            slot = self._build_empty_bus_state(bus_id)
+            slot.update({
+                'connected': True,
+                'channel': channel,
+                'baudrate': 'SIM',
+                'interface': 'simulation',
+                'connection_state': 'connected',
+                'connection_reason': 'simulation',
+                'start_time': simulation_start,
+            })
+            self.bus_connections[bus_id] = slot
+
+    def _ensure_simulation_dbc_support(self) -> bool:
+        """Ensure test mode can emit both BMS traffic and master.dbc bus2 traffic."""
+        requirements = {
+            'BMS-Firmware-RTOS-Complete.dbc': ('BMS_Heartbeat_0', 'Current_Sensor_Data'),
+            'master.dbc': self.SIM_SECONDARY_BUS_MESSAGES,
+        }
+
+        for filename, required_messages in requirements.items():
+            if all(self._find_effective_message_by_name(name) for name in required_messages):
+                continue
+
+            entry = next((item for item in self.dbc_entries if item['filename'] == filename), None)
+            file_path = DBC_DIR / filename
+            if entry is None:
+                if not file_path.exists():
+                    print(f"[SIM] Missing required DBC for simulation: {filename}")
+                    return False
+                entry = {
+                    'filename': filename,
+                    'enabled': False,
+                    'path': file_path,
+                    'database': None,
+                }
+                self.dbc_entries.append(entry)
+
+            if entry.get('database') is None:
+                try:
+                    entry['database'] = self._load_dbc_database_from_file(entry['path'])
+                except Exception as e:
+                    print(f"[SIM] Failed to load {filename}: {e}")
+                    return False
+
+            if not entry.get('enabled'):
+                entry['enabled'] = True
+                self._simulation_temp_enabled_dbc_files.add(filename)
+                self._refresh_effective_dbc()
+
+            if not all(self._find_effective_message_by_name(name) for name in required_messages):
+                print(f"[SIM] Required simulation messages unavailable after loading {filename}")
+                return False
+
+        return True
+
+    def _restore_simulation_dbc_state(self):
+        """Undo temporary DBC enables that were only needed for simulation."""
+        if not self._simulation_temp_enabled_dbc_files:
+            return
+
+        for entry in self.dbc_entries:
+            if entry['filename'] in self._simulation_temp_enabled_dbc_files:
+                entry['enabled'] = False
+
+        self._simulation_temp_enabled_dbc_files.clear()
+        self._refresh_effective_dbc()
     
     def get_bus_status(self) -> dict:
         """Get current bus status"""
         if self._simulation_active:
+            buses = [self._build_simulation_bus_status_entry(bus_id) for bus_id in BUS_IDS]
+            connected_buses = [bus for bus in buses if bus['connected']]
+            total_message_count = sum(int(bus['message_count']) for bus in connected_buses)
             return {
                 'connected': True,
+                'connected_bus_count': len(connected_buses),
+                'primary_bus_id': connected_buses[0]['bus_id'] if connected_buses else None,
                 'device_type': 'simulation',
                 'channel': 'bms-fake-data',
                 'baudrate': 'SIM',
-                'status': 'Connected (Test Mode)',
-                'interface': 'simulation'
+                'status': 'Connected',
+                'interface': 'simulation',
+                'message_count': total_message_count,
+                'buses': buses,
             }
 
-        if not self.is_connected or not self.driver:
+        buses = [self._build_bus_status_entry(bus_id) for bus_id in BUS_IDS]
+        connected_buses = [bus for bus in buses if bus['connected']]
+        primary_bus = connected_buses[0] if connected_buses else next(
+            (bus for bus in buses if bus['status'] != 'Disconnected'),
+            None
+        )
+
+        overall_status = 'Connected' if connected_buses else (
+            'Reconnecting' if any(bus['status'] == 'Reconnecting' for bus in buses) else 'Disconnected'
+        )
+
+        return {
+            'connected': bool(connected_buses),
+            'connected_bus_count': len(connected_buses),
+            'primary_bus_id': primary_bus['bus_id'] if primary_bus else None,
+            'device_type': primary_bus['device_type'] if primary_bus else None,
+            'channel': primary_bus['channel'] if primary_bus else None,
+            'baudrate': primary_bus['baudrate'] if primary_bus else None,
+            'status': overall_status,
+            'interface': primary_bus['interface'] if primary_bus else None,
+            'buses': buses,
+        }
+
+    def get_message_stats(self) -> Dict[str, Any]:
+        """Return aggregate and per-bus message statistics."""
+        if self._simulation_active:
+            buses = [self._build_simulation_bus_status_entry(bus_id) for bus_id in BUS_IDS]
+            connected_buses = [bus for bus in buses if bus['connected']]
+            uptime = max((bus['uptime_seconds'] for bus in connected_buses), default=0.0)
+            message_count = sum(int(bus['message_count']) for bus in connected_buses)
+            message_rate = sum(float(bus['message_rate']) for bus in connected_buses)
             return {
-                'connected': False,
-                'status': self.connection_state.title() if self.connection_state else 'Disconnected'
+                'connected': True,
+                'connected_bus_count': len(connected_buses),
+                'primary_bus_id': connected_buses[0]['bus_id'] if connected_buses else None,
+                'message_count': message_count,
+                'uptime_seconds': uptime,
+                'message_rate': round(message_rate, 2),
+                'buses': buses,
             }
-        
-        status = self.driver.get_bus_status()
-        status['device_type'] = self.device_type.value if self.device_type else None
-        status['status'] = self.connection_state.title()
-        return status
+
+        buses = [self._build_bus_status_entry(bus_id) for bus_id in BUS_IDS]
+        connected_buses = [bus for bus in buses if bus['connected']]
+        uptime = max((bus['uptime_seconds'] for bus in connected_buses), default=0.0)
+        message_count = sum(int(bus['message_count']) for bus in connected_buses)
+        message_rate = sum(float(bus['message_rate']) for bus in connected_buses)
+
+        return {
+            'connected': bool(connected_buses),
+            'connected_bus_count': len(connected_buses),
+            'primary_bus_id': connected_buses[0]['bus_id'] if connected_buses else None,
+            'message_count': message_count,
+            'uptime_seconds': uptime,
+            'message_rate': round(message_rate, 2),
+            'buses': buses,
+        }
 
     def get_connection_health(self) -> dict:
         """Get connection health and recovery state for frontend wake handling."""
+        buses = [
+            {
+                'bus_id': bus_id,
+                'connected': slot['connected'],
+                'connection_state': slot['connection_state'],
+                'recovery_in_progress': slot['recovery_in_progress'],
+                'reason': slot['connection_reason'],
+                'device_type': slot['device_type'].value if slot['device_type'] else None,
+                'channel': slot['channel'],
+                'interface': slot['interface'],
+            }
+            for bus_id, slot in self.bus_connections.items()
+        ]
         return {
             'connected': self.is_connected,
             'connection_state': self.connection_state,
             'recovery_in_progress': self._recovery_in_progress,
             'reason': self.connection_reason,
             'device_type': self.device_type.value if self.device_type else None,
-            'simulation_active': self._simulation_active
+            'simulation_active': self._simulation_active,
+            'connected_bus_count': self.get_connected_bus_count(),
+            'primary_bus_id': self._get_primary_bus_id(),
+            'buses': buses,
         }
 
     def is_simulation_active(self) -> bool:
@@ -1133,6 +1737,15 @@ class CANBackend:
         'MOBO_Current_Telemetry',
         'MOBO_Safety_Status',
         'MOBO_Relay_Status',
+    )
+
+    SIM_SECONDARY_BUS_MESSAGES = (
+        'DBF_WSPD_FL',
+        'DBF_WSPD_FR',
+        'DBL_WSPD_BL',
+        'DBR_WSPD_BR',
+        'BL_BrakeTemp',
+        'FR_BrakeTemp',
     )
 
     def get_hvc_test_mode_status(self) -> Dict[str, Any]:
@@ -1262,10 +1875,15 @@ class CANBackend:
         }
 
     async def _send_hvc_test_message_on_bus(
-        self, message_name: str, signals: Dict[str, Union[int, float]]
+        self,
+        message_name: str,
+        signals: Dict[str, Union[int, float]],
+        bus_id: Optional[str] = None
     ) -> bool:
         """Encode and transmit one HVC test message on the active CAN bus."""
-        if not self.is_connected or not self.driver:
+        try:
+            target_bus_id = self._resolve_active_bus_id(bus_id)
+        except ValueError:
             return False
 
         found = self._find_effective_message_by_name(message_name)
@@ -1277,16 +1895,16 @@ class CANBackend:
             payload = message.encode(signals)
             can_id, is_extended = self._message_identity(message)
             sent = await asyncio.to_thread(
-                self.send_message, can_id, list(payload), is_extended, False
+                self.send_message, can_id, list(payload), is_extended, False, target_bus_id
             )
             if not sent:
                 return False
 
             # Mirror outgoing test frames to UI clients in case the adapter
             # does not loop TX frames back on RX.
-            message_data = self._build_simulated_message(can_id, payload, is_extended)
+            message_data = self._build_simulated_message(can_id, payload, is_extended, target_bus_id)
             message_data['source'] = 'hvc_test_mode_tx'
-            self.message_count += 1
+            self._increment_message_count(target_bus_id)
             await self.broadcast_message(message_data)
             return True
         except Exception as e:
@@ -1299,7 +1917,7 @@ class CANBackend:
             return True
         if self._simulation_active:
             return False
-        if not self.is_connected or not self.driver:
+        if not self.is_connected:
             return False
         if not self._ensure_hvc_summary_messages_available():
             return False
@@ -1327,16 +1945,17 @@ class CANBackend:
         print('[HVC TEST] On-bus summary mode started')
         try:
             while self.hvc_test_mode_enabled:
-                if not self.is_connected or not self.driver:
+                primary_bus_id = self._get_primary_bus_id()
+                if not self.is_connected or primary_bus_id is None:
                     print('[HVC TEST] Stopping because CAN connection is no longer active')
                     break
                 for module in range(6):
                     sigs = self._build_hvc_test_summary_signals(module)
-                    await self._send_hvc_test_message_on_bus(f'Cell_Temp_Summary_{module}', sigs['temp'])
-                    await self._send_hvc_test_message_on_bus(f'BMS1_Voltage_Summary_{module}', sigs['voltage_1'])
-                    await self._send_hvc_test_message_on_bus(f'BMS2_Voltage_Summary_{module}', sigs['voltage_2'])
+                    await self._send_hvc_test_message_on_bus(f'Cell_Temp_Summary_{module}', sigs['temp'], primary_bus_id)
+                    await self._send_hvc_test_message_on_bus(f'BMS1_Voltage_Summary_{module}', sigs['voltage_1'], primary_bus_id)
+                    await self._send_hvc_test_message_on_bus(f'BMS2_Voltage_Summary_{module}', sigs['voltage_2'], primary_bus_id)
                     await self._send_hvc_test_message_on_bus(
-                        f'BMS_Heartbeat_{module}', self._build_hvc_test_heartbeat_signals()
+                        f'BMS_Heartbeat_{module}', self._build_hvc_test_heartbeat_signals(), primary_bus_id
                     )
                 await asyncio.sleep(self.hvc_test_mode_interval_s)
         except asyncio.CancelledError:
@@ -1351,25 +1970,17 @@ class CANBackend:
         if self._simulation_active:
             return True
 
-        if self.is_connected and self.driver:
+        if self.is_connected or self._get_claimed_bus_ids():
             # Real hardware is connected, don't mix simulation with live bus.
             return False
 
         if not DBC_SUPPORT:
             return False
 
-        # Ensure BMS DBC is loaded for encode/decode metadata.
-        # Require both core heartbeat and pack-current message support.
-        needs_bms_load = True
-        if self._find_effective_message_by_name("BMS_Heartbeat_0") and self._find_effective_message_by_name("Current_Sensor_Data"):
-            needs_bms_load = False
-
-        if needs_bms_load:
-            bms_dbc_path = DBC_DIR / "BMS-Firmware-RTOS-Complete.dbc"
-            if not bms_dbc_path.exists():
-                return False
-            if not self.load_dbc_file(str(bms_dbc_path)):
-                return False
+        self._simulation_temp_enabled_dbc_files.clear()
+        if not self._ensure_simulation_dbc_support():
+            self._restore_simulation_dbc_state()
+            return False
 
         self.is_connected = True
         self.device_type = None
@@ -1377,6 +1988,7 @@ class CANBackend:
         self.connection_reason = 'simulation'
         self.start_time = datetime.now()
         self.message_count = 0
+        self._configure_simulation_bus_slots()
         self._simulation_active = True
         self._simulation_started_monotonic = time.perf_counter()
 
@@ -1408,15 +2020,27 @@ class CANBackend:
         self._simulation_task = None
         self._simulation_current_task = None
         self._simulation_started_monotonic = None
+        self._restore_simulation_dbc_state()
+        for bus_id in BUS_IDS:
+            self._reset_bus_slot(bus_id, 'simulation_stopped')
         self.is_connected = False
         self.connection_state = 'disconnected'
         self.connection_reason = 'simulation_stopped'
         self.device_type = None
+        self.start_time = None
+        self.message_count = 0
         return True
 
-    def _build_simulated_message(self, can_id: int, payload: bytes, is_extended: bool) -> dict:
+    def _build_simulated_message(
+        self,
+        can_id: int,
+        payload: bytes,
+        is_extended: bool,
+        bus_id: str = 'bus1'
+    ) -> dict:
         """Build a websocket message payload from simulated CAN bytes."""
         message_data = {
+            'bus_id': bus_id,
             'id': can_id,
             'data': list(payload),
             'timestamp': time.time(),
@@ -1432,7 +2056,12 @@ class CANBackend:
 
         return message_data
 
-    async def _emit_simulated_message(self, message_name: str, signals: Dict[str, Union[int, float]]) -> bool:
+    async def _emit_simulated_message(
+        self,
+        message_name: str,
+        signals: Dict[str, Union[int, float]],
+        bus_id: str = 'bus1'
+    ) -> bool:
         """Encode and broadcast one simulated CAN message by DBC message name."""
         found = self._find_effective_message_by_name(message_name)
         if not found:
@@ -1446,8 +2075,8 @@ class CANBackend:
             }
             payload = message.encode(filtered_signals)
             can_id, is_extended = self._message_identity(message)
-            message_data = self._build_simulated_message(can_id, payload, is_extended)
-            self.message_count += 1
+            message_data = self._build_simulated_message(can_id, payload, is_extended, bus_id)
+            self._increment_message_count(bus_id)
             await self.broadcast_message(message_data)
             return True
         except Exception as e:
@@ -1643,6 +2272,51 @@ class CANBackend:
             },
         }
 
+    def _build_secondary_bus_sim_test_payloads(self, elapsed: float) -> Dict[str, Dict[str, Union[int, float]]]:
+        """Build synthetic wheel-speed and brake-temperature traffic for bus2 using master.dbc."""
+        speed_wave = 0.5 + (0.5 * math.sin((elapsed * 0.42) - 0.45))
+        brake_wave = 0.5 + (0.5 * math.sin((elapsed * 0.18) - 1.1))
+
+        front_base_rpm = 180.0 + (1350.0 * speed_wave)
+        rear_base_rpm = front_base_rpm * (1.01 + (0.015 * math.sin((elapsed * 0.27) + 0.8)))
+        steering_delta = 18.0 * math.sin((elapsed * 0.65) + 0.35)
+        rear_diff = 11.0 * math.sin((elapsed * 0.58) - 0.9)
+
+        wheel_rpms = {
+            'DBF_WSPD_FL': max(0.0, front_base_rpm - steering_delta + random.uniform(-4.0, 4.0)),
+            'DBF_WSPD_FR': max(0.0, front_base_rpm + steering_delta + random.uniform(-4.0, 4.0)),
+            'DBL_WSPD_BL': max(0.0, rear_base_rpm - rear_diff + random.uniform(-4.0, 4.0)),
+            'DBR_WSPD_BR': max(0.0, rear_base_rpm + rear_diff + random.uniform(-4.0, 4.0)),
+        }
+
+        brake_front_base = 68.0 + (155.0 * brake_wave)
+        brake_rear_base = 60.0 + (126.0 * brake_wave)
+
+        payloads: Dict[str, Dict[str, Union[int, float]]] = {}
+        for message_name, rpm in wheel_rpms.items():
+            avg_delta_us = int(max(800, round(60_000_000.0 / max(1.0, rpm * 48.0))))
+            payloads[message_name] = {
+                f'{message_name}_Valid': 1,
+                f'{message_name}_Timeout': 0,
+                f'{message_name}_Avg_Delta': avg_delta_us,
+                f'{message_name}_RPM': round(rpm),
+            }
+
+        payloads['BL_BrakeTemp'] = {
+            'BL_BrakeTemp_Ch1': round(brake_rear_base + 7.0 + random.uniform(-1.6, 1.6), 1),
+            'BL_BrakeTemp_Ch2': round(brake_rear_base + 3.5 + random.uniform(-1.4, 1.4), 1),
+            'BL_BrakeTemp_Ch3': round(brake_rear_base - 2.0 + random.uniform(-1.2, 1.2), 1),
+            'BL_BrakeTemp_Ch4': round(brake_rear_base + 1.5 + random.uniform(-1.3, 1.3), 1),
+        }
+        payloads['FR_BrakeTemp'] = {
+            'FR_BrakeTemp_Ch1': round(brake_front_base + 9.0 + random.uniform(-1.8, 1.8), 1),
+            'FR_BrakeTemp_Ch2': round(brake_front_base + 4.0 + random.uniform(-1.5, 1.5), 1),
+            'FR_BrakeTemp_Ch3': round(brake_front_base - 3.5 + random.uniform(-1.2, 1.2), 1),
+            'FR_BrakeTemp_Ch4': round(brake_front_base + 2.5 + random.uniform(-1.4, 1.4), 1),
+        }
+
+        return payloads
+
     async def _run_simulated_current_sensor(self):
         """Emit Current_Sensor_Data at a fixed 10 ms cadence while simulation is active."""
         try:
@@ -1665,7 +2339,8 @@ class CANBackend:
                         "Reserved_5": 0,
                         "Reserved_6": 0,
                         "Reserved_7": 0
-                    }
+                    },
+                    bus_id='bus1'
                 )
 
                 next_emit += emit_interval_s
@@ -1694,6 +2369,10 @@ class CANBackend:
         optional_messages_available = {
             name: bool(self._find_effective_message_by_name(name))
             for name in self.SIM_TEST_OPTIONAL_MESSAGES
+        }
+        secondary_bus_messages_available = {
+            name: bool(self._find_effective_message_by_name(name))
+            for name in self.SIM_SECONDARY_BUS_MESSAGES
         }
 
         def normalized_triangle(phase: float) -> tuple[float, bool]:
@@ -1851,7 +2530,8 @@ class CANBackend:
 
                         await self._emit_simulated_message(
                             temp_message_name,
-                            signal_payload
+                            signal_payload,
+                            bus_id='bus1'
                         )
 
                     # 6 cell-voltage frames per module, 3 voltages each.
@@ -1881,7 +2561,8 @@ class CANBackend:
                         cell_end = cell_start + 2
                         await self._emit_simulated_message(
                             f"Cell_Voltage_{cell_start}_{cell_end}",
-                            signal_payload
+                            signal_payload,
+                            bus_id='bus1'
                         )
 
                     await self._emit_simulated_message(
@@ -1894,7 +2575,8 @@ class CANBackend:
                             "Error_Flags_Byte3": 0,
                             "Warning_Summary": 0,
                             "Fault_Count": 0
-                        }
+                        },
+                        bus_id='bus1'
                     )
 
                 elapsed_for_optional = self._get_simulation_elapsed()
@@ -1904,7 +2586,12 @@ class CANBackend:
                 )
                 for message_name, payload in optional_payloads.items():
                     if optional_messages_available.get(message_name):
-                        await self._emit_simulated_message(message_name, payload)
+                        await self._emit_simulated_message(message_name, payload, bus_id='bus1')
+
+                secondary_bus_payloads = self._build_secondary_bus_sim_test_payloads(elapsed_for_optional)
+                for message_name, payload in secondary_bus_payloads.items():
+                    if secondary_bus_messages_available.get(message_name):
+                        await self._emit_simulated_message(message_name, payload, bus_id='bus2')
 
                 await asyncio.sleep(0.2)
         except asyncio.CancelledError:
@@ -2049,17 +2736,25 @@ class CANBackend:
         print(f"[DECODE] Message not found in enabled DBCs: can_id=0x{can_id:X}, is_extended={is_extended}")
         return None
     
-    def _on_message_received(self, msg):
+    def _make_message_callback(self, bus_id: str):
+        """Bind one driver's receive callback to a bus slot."""
+        def _callback(msg):
+            self._on_message_received(msg, bus_id=bus_id)
+        return _callback
+
+    def _on_message_received(self, msg, bus_id: Optional[str] = None):
         """Callback for received CAN messages - broadcasts to all WebSocket clients
         
         This is called from the driver's receive thread, so we need to schedule
         the async broadcast on the main event loop.
         """
-        self.message_count += 1
+        target_bus_id = bus_id if bus_id in self.bus_connections else None
+        message_count = self._increment_message_count(target_bus_id)
         received_at = time.time()
         
         # Convert message to JSON-serializable format
         message_data = {
+            'bus_id': target_bus_id,
             'id': msg.id,
             'data': list(msg.data),
             'timestamp': msg.timestamp,
@@ -2070,8 +2765,8 @@ class CANBackend:
         }
         
         # Debug: Print first few messages
-        if self.message_count <= 5:
-            print(f"[RX] Message #{self.message_count}: ID=0x{msg.id:X}, Extended={msg.is_extended}, DLC={msg.dlc}, Data={msg.data.hex()}")
+        if message_count <= 5:
+            print(f"[RX][{target_bus_id or 'unknown'}] Message #{message_count}: ID=0x{msg.id:X}, Extended={msg.is_extended}, DLC={msg.dlc}, Data={msg.data.hex()}")
         
         # Check for server-decoded data (Network driver with DBC loaded on server)
         if hasattr(msg, 'server_decoded') and msg.server_decoded:
@@ -2099,7 +2794,7 @@ class CANBackend:
                     'message_name': server_decoded.get('message_name'),
                     'signals': signals
                 }
-                if self.message_count <= 5:
+                if message_count <= 5:
                     print(f"[RX] Server-decoded: {server_decoded.get('message_name')}")
         # Fallback to local DBC decoding if no server-decoded data
         elif self.dbc_database:
@@ -2107,19 +2802,19 @@ class CANBackend:
             if decoded:
                 message_data['decoded'] = decoded
         else:
-            if self.message_count <= 2:
+            if message_count <= 2:
                 print(f"[RX] No DBC database available for decoding")
         
         # Schedule broadcast on the event loop (if available)
         if self.loop and self.loop.is_running():
-            if self.message_count <= 5:
+            if message_count <= 5:
                 print(f"[RX] Broadcasting to {len(self.active_connections)} clients, loop running: {self.loop.is_running()}")
             asyncio.run_coroutine_threadsafe(
                 self.broadcast_message(message_data),
                 self.loop
             )
         else:
-            if self.message_count <= 5:
+            if message_count <= 5:
                 print(f"[RX] NOT broadcasting - loop={self.loop}, running={self.loop.is_running() if self.loop else 'N/A'}")
     
     async def broadcast_message(self, message: dict):
@@ -2183,10 +2878,8 @@ def get_transmit_list_path(dbc_context: str) -> Path:
 def cleanup_on_exit():
     """Cleanup handler called on program exit."""
     print("\n[Cleanup] Performing cleanup on exit...")
-    if backend.is_connected:
+    if backend.is_connected or backend._get_claimed_bus_ids():
         try:
-            if backend.driver and hasattr(backend.driver, 'stop_receive_thread'):
-                backend.driver.stop_receive_thread()
             backend.disconnect()
             print("[Cleanup] Disconnected successfully")
         except Exception as e:
@@ -2227,19 +2920,28 @@ async def get_devices():
 @app.post("/connect", response_model=ConnectionResponse)
 async def connect(request: ConnectionRequest):
     """Connect to a CAN device"""
-    if backend.is_connected:
-        raise HTTPException(status_code=400, detail="Already connected. Disconnect first.")
+    connected_bus_id = backend.connect(
+        request.device_type,
+        request.channel,
+        request.baudrate,
+        request.bus_id,
+    )
     
-    success = backend.connect(request.device_type, request.channel, request.baudrate)
-    
-    if success:
-        await backend.broadcast_connection_status('connected', 'connected_via_api')
+    if connected_bus_id:
+        status = backend.get_bus_status()
+        bus_status = next(
+            (bus for bus in status['buses'] if bus['bus_id'] == connected_bus_id),
+            {}
+        )
+        await backend.broadcast_connection_status('connected', 'connected_via_api', connected_bus_id)
         return ConnectionResponse(
             success=True,
             message="Connected successfully",
-            device_type=request.device_type.value,
-            channel=request.channel,
-            baudrate=request.baudrate
+            bus_id=connected_bus_id,
+            connected_bus_count=status['connected_bus_count'],
+            device_type=bus_status.get('device_type') or request.device_type.value,
+            channel=bus_status.get('channel', request.channel),
+            baudrate=bus_status.get('baudrate', request.baudrate)
         )
     else:
         detail = backend.connection_reason or "Failed to connect to device"
@@ -2247,30 +2949,45 @@ async def connect(request: ConnectionRequest):
 
 
 @app.post("/disconnect", response_model=DisconnectionResponse)
-async def disconnect():
+async def disconnect(request: Optional[DisconnectionRequest] = None):
     """Disconnect from CAN device"""
+    target_bus_id = request.bus_id if request else None
     if backend.is_simulation_active():
         await backend.stop_simulation()
         await backend.broadcast_connection_status('disconnected', 'simulation_stopped')
-        return DisconnectionResponse(success=True, message="Simulation stopped")
+        return DisconnectionResponse(
+            success=True,
+            message="Simulation stopped",
+            disconnected_bus_ids=['simulation'],
+            connected_bus_count=0,
+        )
 
     if backend.hvc_test_mode_enabled:
         await backend.stop_hvc_test_mode()
 
-    if not backend.is_connected and not backend._recovery_in_progress:
+    if not backend.is_connected and not backend._recovery_in_progress and not backend._get_claimed_bus_ids():
         raise HTTPException(status_code=400, detail="Not connected to any device")
-    
-    # Signal that the user explicitly asked to disconnect so the health
-    # monitor stops trying to recover the connection.
-    backend._user_requested_disconnect = True
-    
-    success = backend.disconnect()
-    
-    if success:
-        await backend.broadcast_connection_status('disconnected', 'disconnected_via_api')
-        return DisconnectionResponse(success=True, message="Disconnected successfully")
-    else:
-        raise HTTPException(status_code=500, detail="Failed to disconnect")
+
+    disconnected_bus_ids = backend.disconnect(target_bus_id)
+
+    if disconnected_bus_ids:
+        for disconnected_bus_id in disconnected_bus_ids:
+            await backend.broadcast_connection_status('disconnected', 'disconnected_via_api', disconnected_bus_id)
+
+        message = (
+            f"Disconnected {disconnected_bus_ids[0]} successfully"
+            if len(disconnected_bus_ids) == 1
+            else "Disconnected all buses successfully"
+        )
+        return DisconnectionResponse(
+            success=True,
+            message=message,
+            bus_id=disconnected_bus_ids[0] if len(disconnected_bus_ids) == 1 else None,
+            disconnected_bus_ids=disconnected_bus_ids,
+            connected_bus_count=backend.get_connected_bus_count(),
+        )
+
+    raise HTTPException(status_code=500, detail="Failed to disconnect")
 
 
 @app.get("/status", response_model=BusStatusResponse)
@@ -2298,18 +3015,29 @@ async def send_message(request: CANMessageRequest):
     """Send a CAN message"""
     if not backend.is_connected:
         raise HTTPException(status_code=400, detail="Not connected to any device")
+
+    try:
+        target_bus_id = backend.resolve_target_bus_id(request.bus_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     
     success = backend.send_message(
         request.can_id,
         request.data,
         request.is_extended,
-        request.is_remote
+        request.is_remote,
+        target_bus_id,
     )
     
     if success:
-        return CANMessageResponse(success=True, message="Message sent successfully")
+        return CANMessageResponse(
+            success=True,
+            message="Message sent successfully",
+            bus_id=target_bus_id,
+        )
     else:
-        raise HTTPException(status_code=500, detail="Failed to send message")
+        detail = backend.connection_reason or "Failed to send message"
+        raise HTTPException(status_code=500, detail=detail)
 
 
 @app.post("/dbc/upload", response_model=DBCLoadResponse)
@@ -2431,23 +3159,7 @@ async def get_dbc_messages():
 @app.get("/stats")
 async def get_stats():
     """Get message statistics"""
-    if not backend.is_connected:
-        return {
-            "connected": False,
-            "message_count": 0,
-            "uptime_seconds": 0,
-            "message_rate": 0
-        }
-    
-    uptime = (datetime.now() - backend.start_time).total_seconds() if backend.start_time else 0
-    message_rate = backend.message_count / uptime if uptime > 0 else 0
-    
-    return {
-        "connected": True,
-        "message_count": backend.message_count,
-        "uptime_seconds": uptime,
-        "message_rate": round(message_rate, 2)
-    }
+    return backend.get_message_stats()
 
 
 @app.post("/simulation/start")
@@ -2746,12 +3458,7 @@ async def websocket_can_messages(websocket: WebSocket):
     # Inform the new client of the current CAN connection state so it can
     # render the correct UI immediately (e.g. during an ongoing reconnect).
     try:
-        await websocket.send_json({
-            "type": "connection_status",
-            "status": backend.connection_state,
-            "reason": backend.connection_reason,
-            "timestamp": datetime.now().isoformat()
-        })
+        await websocket.send_json(backend._build_connection_status_payload())
     except Exception:
         pass
 

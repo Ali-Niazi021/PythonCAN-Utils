@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css';
-import Header from './components/Header';
-import ConnectionPanel from './components/ConnectionPanel';
 import CANExplorer from './components/CANExplorer';
 import ModuleConfig from './components/ModuleConfig';
 import BMSOverview from './components/BMSOverview';
@@ -11,29 +9,204 @@ import HVCDashboard from './components/HVCDashboard';
 import MoboDashboard from './components/MoboDashboard';
 import InverterDashboard from './components/InverterDashboard';
 import VCUDashboard from './components/VCUDashboard';
-import StatusBar from './components/StatusBar';
 import { apiService } from './services/api';
 import { websocketService } from './services/websocket';
 
 const isPageVisible = () => typeof document === 'undefined' || document.visibilityState === 'visible';
-const getMessageAggregateKey = (msg) => `${msg.is_extended ? 'ext' : 'std'}:${msg.id}`;
+const BUS_IDS = ['bus1', 'bus2'];
+
+const formatStatusLabel = (status) => {
+  if (!status || typeof status !== 'string') {
+    return 'Disconnected';
+  }
+  return status.charAt(0).toUpperCase() + status.slice(1);
+};
+
+const createEmptyBusState = (busId) => ({
+  bus_id: busId,
+  connected: false,
+  device_type: null,
+  channel: null,
+  baudrate: null,
+  status: 'Disconnected',
+  interface: null,
+  reason: null,
+  message_count: 0,
+  uptime_seconds: 0,
+  message_rate: 0,
+});
+
+const mergeBusStates = (buses = []) => {
+  if (!Array.isArray(buses) || buses.length === 0) {
+    return BUS_IDS.map(createEmptyBusState);
+  }
+
+  const busMap = new Map(
+    buses
+      .filter((bus) => bus && bus.bus_id)
+      .map((bus) => [
+        bus.bus_id,
+        {
+          ...createEmptyBusState(bus.bus_id),
+          ...bus,
+          status: formatStatusLabel(bus.status),
+        },
+      ])
+  );
+
+  if (busMap.has('simulation')) {
+    return Array.from(busMap.values());
+  }
+
+  return BUS_IDS.map((busId) => ({
+    ...createEmptyBusState(busId),
+    ...(busMap.get(busId) || {}),
+  }));
+};
+
+const createEmptyConnectionStatus = () => ({
+  connected: false,
+  connected_bus_count: 0,
+  primary_bus_id: null,
+  device_type: null,
+  channel: null,
+  baudrate: null,
+  status: 'Disconnected',
+  interface: null,
+  buses: BUS_IDS.map(createEmptyBusState),
+});
+
+const createEmptyStats = () => ({
+  connected: false,
+  connected_bus_count: 0,
+  primary_bus_id: null,
+  message_count: 0,
+  uptime_seconds: 0,
+  message_rate: 0,
+  buses: BUS_IDS.map(createEmptyBusState),
+});
+
+const createSimulationConnectionStatus = () => ({
+  connected: true,
+  connected_bus_count: BUS_IDS.length,
+  primary_bus_id: 'bus1',
+  device_type: 'simulation',
+  channel: 'bms-fake-data',
+  baudrate: 'SIM',
+  status: 'Connected',
+  interface: 'simulation',
+  buses: BUS_IDS.map((busId) => ({
+    ...createEmptyBusState(busId),
+    connected: true,
+    device_type: 'simulation',
+    channel: busId === 'bus1' ? 'bms-fake-data' : 'master-fake-data',
+    baudrate: 'SIM',
+    status: 'Connected',
+    interface: 'simulation',
+    reason: 'simulation',
+  })),
+});
+
+const normalizeConnectionStatus = (status = {}) => ({
+  ...createEmptyConnectionStatus(),
+  ...status,
+  connected: Boolean(status.connected),
+  status: formatStatusLabel(status.status || (status.connected ? 'connected' : 'disconnected')),
+  buses: mergeBusStates(status.buses),
+});
+
+const normalizeStats = (stats = {}) => ({
+  ...createEmptyStats(),
+  ...stats,
+  connected: Boolean(stats.connected),
+  buses: mergeBusStates(stats.buses),
+});
+
+const getExplorerAggregateKey = (msg) => `${msg.bus_id || 'bus1'}:${msg.is_extended ? 'ext' : 'std'}:${msg.id}`;
+const getDashboardAggregateKey = (msg) => `${msg.is_extended ? 'ext' : 'std'}:${msg.id}`;
+
+const compareExplorerMessages = (left, right) => {
+  if (left.id !== right.id) {
+    return left.id - right.id;
+  }
+
+  if ((left.bus_id || 'bus1') !== (right.bus_id || 'bus1')) {
+    return (left.bus_id || 'bus1').localeCompare(right.bus_id || 'bus1');
+  }
+
+  return Number(left.is_extended) - Number(right.is_extended);
+};
+
+const compareDashboardMessages = (left, right) => {
+  if (left.id !== right.id) {
+    return left.id - right.id;
+  }
+  return Number(left.is_extended) - Number(right.is_extended);
+};
+
+const aggregateMessages = (previousMessages, incomingMessages, getAggregateKey, messageCounts, compareMessages) => {
+  const messageMap = new Map();
+  previousMessages.forEach((message) => {
+    messageMap.set(getAggregateKey(message), message);
+  });
+
+  incomingMessages.forEach((message) => {
+    const aggregateKey = getAggregateKey(message);
+    const existingMessage = messageMap.get(aggregateKey);
+    const currentCount = messageCounts.get(aggregateKey) || 0;
+    messageCounts.set(aggregateKey, currentCount + 1);
+
+    let mergedDecoded = message.decoded;
+    if (existingMessage?.decoded) {
+      if (message.decoded?.signals) {
+        mergedDecoded = {
+          ...existingMessage.decoded,
+          ...message.decoded,
+          signals: {
+            ...(existingMessage.decoded.signals || {}),
+            ...message.decoded.signals,
+          },
+        };
+      } else {
+        mergedDecoded = existingMessage.decoded;
+      }
+    }
+
+    const nextMessage = {
+      ...message,
+      decoded: mergedDecoded,
+    };
+
+    if (existingMessage) {
+      const timeDiff = message.timestamp - existingMessage.timestamp;
+      messageMap.set(aggregateKey, {
+        ...nextMessage,
+        count: messageCounts.get(aggregateKey),
+        cycleTime: timeDiff > 0 ? timeDiff : existingMessage.cycleTime,
+        lastTimestamp: existingMessage.timestamp,
+      });
+      return;
+    }
+
+    messageMap.set(aggregateKey, {
+      ...nextMessage,
+      count: messageCounts.get(aggregateKey),
+      cycleTime: null,
+      lastTimestamp: null,
+    });
+  });
+
+  return Array.from(messageMap.values()).sort(compareMessages);
+};
 
 function App() {
   const [activeTab, setActiveTab] = useState('explorer');
   const [connected, setConnected] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState({
-    device_type: null,
-    channel: null,
-    baudrate: null,
-    status: 'Disconnected'
-  });
+  const [connectionStatus, setConnectionStatus] = useState(createEmptyConnectionStatus);
   const [devices, setDevices] = useState([]);
   const [messages, setMessages] = useState([]);
-  const [stats, setStats] = useState({
-    message_count: 0,
-    uptime_seconds: 0,
-    message_rate: 0
-  });
+  const [explorerMessages, setExplorerMessages] = useState([]);
+  const [stats, setStats] = useState(createEmptyStats);
   const [dbcConfig, setDbcConfig] = useState({
     loaded: false,
     filename: null,
@@ -60,14 +233,16 @@ function App() {
   // Performance: Batch incoming messages and aggregate by CAN ID
   const messageBufferRef = useRef([]);
   const flushIntervalRef = useRef(null);
-  const messageCountsRef = useRef(new Map()); // Track total counts per CAN ID
+  const dashboardMessageCountsRef = useRef(new Map());
+  const explorerMessageCountsRef = useRef(new Map());
   const wakeCheckTimerRef = useRef(null);
   const toastTimerRef = useRef(null);
   const lastHeartbeatRef = useRef(Date.now());
   const canStateRef = useRef('unknown'); // tracks backend CAN state for toast gating
+  const connectWebSocketRef = useRef(null);
   
   // Raw message callbacks for components that need to see ALL messages (not aggregated)
-  const rawMessageCallbacksRef = useRef([]);;
+  const rawMessageCallbacksRef = useRef([]);
   
   // Register/unregister callbacks for raw messages
   const registerRawMessageCallback = useCallback((callback) => {
@@ -90,72 +265,22 @@ function App() {
         if (messageBufferRef.current.length > 0) {
           const bufferedMessages = [...messageBufferRef.current];
           messageBufferRef.current = [];
-          
-          setMessages(prev => {
-            // Create a map from existing messages
-            const messageMap = new Map();
-            prev.forEach(msg => {
-              messageMap.set(getMessageAggregateKey(msg), msg);
-            });
-            
-            // Update with new messages (aggregating by CAN ID + frame format)
-            bufferedMessages.forEach(msg => {
-              const aggregateKey = getMessageAggregateKey(msg);
-              const existing = messageMap.get(aggregateKey);
-              
-              // Update count
-              const currentCount = messageCountsRef.current.get(aggregateKey) || 0;
-              messageCountsRef.current.set(aggregateKey, currentCount + 1);
 
-              let mergedDecoded = msg.decoded;
-              if (existing?.decoded) {
-                if (msg.decoded?.signals) {
-                  mergedDecoded = {
-                    ...existing.decoded,
-                    ...msg.decoded,
-                    signals: {
-                      ...(existing.decoded.signals || {}),
-                      ...msg.decoded.signals
-                    }
-                  };
-                } else {
-                  mergedDecoded = existing.decoded;
-                }
-              }
+          setExplorerMessages((previousMessages) => aggregateMessages(
+            previousMessages,
+            bufferedMessages,
+            getExplorerAggregateKey,
+            explorerMessageCountsRef.current,
+            compareExplorerMessages
+          ));
 
-              const nextMessage = {
-                ...msg,
-                decoded: mergedDecoded
-              };
-              
-              if (existing) {
-                // Update existing entry with new data
-                const timeDiff = msg.timestamp - existing.timestamp;
-                messageMap.set(aggregateKey, {
-                  ...nextMessage,
-                  count: messageCountsRef.current.get(aggregateKey),
-                  cycleTime: timeDiff > 0 ? timeDiff : existing.cycleTime,
-                  lastTimestamp: existing.timestamp
-                });
-              } else {
-                // New CAN ID
-                messageMap.set(aggregateKey, {
-                  ...nextMessage,
-                  count: messageCountsRef.current.get(aggregateKey),
-                  cycleTime: null,
-                  lastTimestamp: null
-                });
-              }
-            });
-            
-            // Convert back to array, sorted by CAN ID then frame format
-            return Array.from(messageMap.values()).sort((a, b) => {
-              if (a.id !== b.id) {
-                return a.id - b.id;
-              }
-              return Number(a.is_extended) - Number(b.is_extended);
-            });
-          });
+          setMessages((previousMessages) => aggregateMessages(
+            previousMessages,
+            bufferedMessages,
+            getDashboardAggregateKey,
+            dashboardMessageCountsRef.current,
+            compareDashboardMessages
+          ));
         }
       }, 100);
     } else {
@@ -174,15 +299,7 @@ function App() {
     };
   }, [connected]);
 
-  // Fetch available devices on mount
-  useEffect(() => {
-    fetchDevices();
-    checkConnectionStatus();
-    checkSimulationStatus();
-    checkDBCStatus();
-  }, []);
-
-  const fetchDevices = async () => {
+  const fetchDevices = useCallback(async () => {
     try {
       const data = await apiService.getDevices();
       console.log('[App] Fetched devices:', data.devices);
@@ -190,45 +307,40 @@ function App() {
     } catch (error) {
       console.error('Failed to fetch devices:', error);
     }
-  };
+  }, []);
 
-  const checkConnectionStatus = async () => {
+  const checkConnectionStatus = useCallback(async () => {
     try {
-      const status = await apiService.getStatus();
+      const status = normalizeConnectionStatus(await apiService.getStatus());
       setConnected(status.connected);
       setConnectionStatus(status);
       setSimulationActive(status.device_type === 'simulation');
       
       if (status.connected && !websocketService.isConnected()) {
-        connectWebSocket();
+        connectWebSocketRef.current?.();
       }
     } catch (error) {
       console.error('Failed to check status:', error);
     }
-  };
+  }, []);
 
-  const checkSimulationStatus = async () => {
+  const checkSimulationStatus = useCallback(async () => {
     try {
       const status = await apiService.getSimulationStatus();
       setSimulationActive(status.active);
 
       if (status.active) {
         setConnected(true);
-        setConnectionStatus({
-          device_type: 'simulation',
-          channel: 'bms-fake-data',
-          baudrate: 'SIM',
-          status: 'Connected (Test Mode)'
-        });
+        setConnectionStatus(normalizeConnectionStatus(createSimulationConnectionStatus()));
 
         if (!websocketService.isConnected()) {
-          connectWebSocket();
+          connectWebSocketRef.current?.();
         }
       }
     } catch (error) {
       console.error('Failed to check simulation status:', error);
     }
-  };
+  }, []);
 
   const dismissToast = useCallback(() => {
     if (toastTimerRef.current) {
@@ -285,48 +397,57 @@ function App() {
     }
   }, [connected, showToast]);
 
-  const checkDBCStatus = async () => {
+  const checkDBCStatus = useCallback(async () => {
     try {
       const dbcStatus = await apiService.getDBCConfig();
       setDbcConfig(dbcStatus);
     } catch (error) {
       console.error('Failed to check DBC status:', error);
     }
-  };
+  }, []);
 
   // Clear all messages and counts
   const handleClearMessages = useCallback(() => {
     setMessages([]);
-    messageCountsRef.current.clear();
+    setExplorerMessages([]);
+    dashboardMessageCountsRef.current.clear();
+    explorerMessageCountsRef.current.clear();
     messageBufferRef.current = [];
   }, []);
 
   const connectWebSocket = useCallback(() => {
     websocketService.connect((message) => {
       if (message.type === 'connection_status') {
-        if (message.status === 'reconnecting') {
+        const aggregateStatus = message.status || 'disconnected';
+        const nextConnectionStatus = normalizeConnectionStatus({
+          connected: message.connected,
+          connected_bus_count: message.connected_bus_count,
+          primary_bus_id: message.primary_bus_id,
+          status: aggregateStatus,
+          buses: message.buses,
+        });
+
+        setConnectionStatus(nextConnectionStatus);
+        setConnected(Boolean(nextConnectionStatus.connected));
+
+        if (aggregateStatus === 'reconnecting') {
           canStateRef.current = 'reconnecting';
-          setConnectionStatus(prev => ({ ...prev, status: 'Reconnecting' }));
           showToast('Reconnecting to CAN hardware...', 'warning', 0);
-        } else if (message.status === 'connected') {
+        } else if (aggregateStatus === 'connected') {
           const simulationConnected = message.reason === 'simulation_started' || simulationActive;
           if (simulationConnected) {
             setSimulationActive(true);
           }
           const wasDown = canStateRef.current === 'reconnecting' || canStateRef.current === 'disconnected';
           canStateRef.current = 'connected';
-          setConnected(true);
-          setConnectionStatus(prev => ({ ...prev, status: 'Connected' }));
           if (wasDown && !simulationConnected) {
             showToast('CAN connection restored', 'success', 3000);
           }
-        } else if (message.status === 'disconnected') {
+        } else if (aggregateStatus === 'disconnected') {
           if (message.reason === 'simulation_stopped') {
             setSimulationActive(false);
           }
           canStateRef.current = 'disconnected';
-          setConnected(false);
-          setConnectionStatus(prev => ({ ...prev, status: 'Disconnected' }));
           if (message.reason === 'hardware_lost') {
             showToast('CAN connection lost — hardware may need to be re-plugged', 'error', 0);
           }
@@ -352,28 +473,36 @@ function App() {
     });
   }, [checkConnectionStatus, showToast, simulationActive]);
 
-  const handleConnect = async (deviceType, channel, baudrate) => {
+  useEffect(() => {
+    connectWebSocketRef.current = connectWebSocket;
+  }, [connectWebSocket]);
+
+  // Fetch available devices and backend status on mount.
+  useEffect(() => {
+    fetchDevices();
+    checkConnectionStatus();
+    checkSimulationStatus();
+    checkDBCStatus();
+  }, [fetchDevices, checkConnectionStatus, checkSimulationStatus, checkDBCStatus]);
+
+  const handleConnect = async (busId, deviceType, channel, baudrate) => {
     if (simulationActive) {
       alert('Stop Test Mode before connecting to real hardware.');
       return false;
     }
 
-    console.log('handleConnect called with:', { deviceType, channel, baudrate });
+    console.log('handleConnect called with:', { busId, deviceType, channel, baudrate });
     try {
       console.log('Calling API connect...');
-      const response = await apiService.connect(deviceType, channel, baudrate);
+      const response = await apiService.connect(deviceType, channel, baudrate, busId);
       console.log('API response:', response);
       
       if (response.success) {
+        await checkConnectionStatus();
         canStateRef.current = 'connected';
-        setConnected(true);
-        setConnectionStatus({
-          device_type: deviceType,
-          channel: channel,
-          baudrate: baudrate,
-          status: 'Connected'
-        });
-        connectWebSocket();
+        if (!websocketService.isConnected()) {
+          connectWebSocket();
+        }
         console.log('Connected successfully!');
         return true;
       }
@@ -392,12 +521,7 @@ function App() {
       if (response.success) {
         setSimulationActive(true);
         setConnected(true);
-        setConnectionStatus({
-          device_type: 'simulation',
-          channel: 'bms-fake-data',
-          baudrate: 'SIM',
-          status: 'Connected (Test Mode)'
-        });
+        setConnectionStatus(normalizeConnectionStatus(createSimulationConnectionStatus()));
 
         if (!websocketService.isConnected()) {
           connectWebSocket();
@@ -428,12 +552,7 @@ function App() {
         websocketService.disconnect();
         setSimulationActive(false);
         setConnected(false);
-        setConnectionStatus({
-          device_type: null,
-          channel: null,
-          baudrate: null,
-          status: 'Disconnected'
-        });
+        setConnectionStatus(createEmptyConnectionStatus());
         setToast(null);
         return true;
       }
@@ -444,21 +563,19 @@ function App() {
     }
   };
 
-  const handleDisconnect = async () => {
+  const handleDisconnect = async (busId = null) => {
     try {
       // Clear message buffer
       messageBufferRef.current = [];
       
-      await apiService.disconnect();
-      websocketService.disconnect();
-      canStateRef.current = 'disconnected';
-      setConnected(false);
-      setConnectionStatus({
-        device_type: null,
-        channel: null,
-        baudrate: null,
-        status: 'Disconnected'
-      });
+      await apiService.disconnect(busId);
+      const status = normalizeConnectionStatus(await apiService.getStatus());
+      setConnected(status.connected);
+      setConnectionStatus(status);
+      canStateRef.current = status.connected ? 'connected' : 'disconnected';
+      if (!status.connected) {
+        websocketService.disconnect();
+      }
       setToast(null);
       // Don't clear messages on disconnect - they persist until manually cleared
       return true;
@@ -468,9 +585,9 @@ function App() {
     }
   };
 
-  const handleSendMessage = async (canId, data, isExtended, isRemote) => {
+  const handleSendMessage = async (canId, data, isExtended, isRemote, busId = null) => {
     try {
-      await apiService.sendMessage(canId, data, isExtended, isRemote);
+      await apiService.sendMessage(canId, data, isExtended, isRemote, busId);
       return true;
     } catch (error) {
       console.error('Send failed:', error);
@@ -528,7 +645,7 @@ function App() {
 
     const interval = setInterval(async () => {
       try {
-        const statsData = await apiService.getStats();
+        const statsData = normalizeStats(await apiService.getStats());
         setStats(statsData);
 
         const now = Date.now();
@@ -590,7 +707,7 @@ function App() {
         {activeTab === 'explorer' && (
           <CANExplorer
             connected={connected}
-            messages={messages}
+            messages={explorerMessages}
             onClearMessages={handleClearMessages}
             onSendMessage={handleSendMessage}
             onLoadDBC={handleLoadDBC}
@@ -619,7 +736,7 @@ function App() {
         {activeTab === 'bms-status' && (
           <CANExplorer
             connected={connected}
-            messages={messages}
+            messages={explorerMessages}
             onClearMessages={handleClearMessages}
             onSendMessage={handleSendMessage}
             onLoadDBC={handleLoadDBC}
@@ -655,7 +772,7 @@ function App() {
         {activeTab === 'bms-overview' && (
           <CANExplorer
             connected={connected}
-            messages={messages}
+            messages={explorerMessages}
             onClearMessages={handleClearMessages}
             onSendMessage={handleSendMessage}
             onLoadDBC={handleLoadDBC}
@@ -686,7 +803,7 @@ function App() {
         {activeTab === 'balance-manager' && (
           <CANExplorer
             connected={connected}
-            messages={messages}
+            messages={explorerMessages}
             onClearMessages={handleClearMessages}
             onSendMessage={handleSendMessage}
             onLoadDBC={handleLoadDBC}
@@ -721,7 +838,7 @@ function App() {
         {activeTab === 'module-config' && (
           <CANExplorer
             connected={connected}
-            messages={messages}
+            messages={explorerMessages}
             onClearMessages={handleClearMessages}
             onSendMessage={handleSendMessage}
             onLoadDBC={handleLoadDBC}
@@ -758,7 +875,7 @@ function App() {
         {activeTab === 'hvc-dashboard' && (
           <CANExplorer
             connected={connected}
-            messages={messages}
+            messages={explorerMessages}
             onClearMessages={handleClearMessages}
             onSendMessage={handleSendMessage}
             onLoadDBC={handleLoadDBC}
@@ -793,7 +910,7 @@ function App() {
         {activeTab === 'vcu-dashboard' && (
           <CANExplorer
             connected={connected}
-            messages={messages}
+            messages={explorerMessages}
             onClearMessages={handleClearMessages}
             onSendMessage={handleSendMessage}
             onLoadDBC={handleLoadDBC}
@@ -829,7 +946,7 @@ function App() {
         {activeTab === 'mobo' && (
           <CANExplorer
             connected={connected}
-            messages={messages}
+            messages={explorerMessages}
             onClearMessages={handleClearMessages}
             onSendMessage={handleSendMessage}
             onLoadDBC={handleLoadDBC}
@@ -866,7 +983,7 @@ function App() {
         {activeTab === 'inverter-dashboard' && (
           <CANExplorer
             connected={connected}
-            messages={messages}
+            messages={explorerMessages}
             onClearMessages={handleClearMessages}
             onSendMessage={handleSendMessage}
             onLoadDBC={handleLoadDBC}

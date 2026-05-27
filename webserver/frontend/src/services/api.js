@@ -43,8 +43,9 @@ class ApiService {
     return response.data;
   }
 
-  async connect(deviceType, channel, baudrate) {
+  async connect(deviceType, channel, baudrate, busId = null) {
     const response = await this.client.post('/connect', {
+      bus_id: busId,
       device_type: deviceType,
       channel: channel,
       baudrate: baudrate,
@@ -52,8 +53,8 @@ class ApiService {
     return response.data;
   }
 
-  async disconnect() {
-    const response = await this.client.post('/disconnect');
+  async disconnect(busId = null) {
+    const response = await this.client.post('/disconnect', busId ? { bus_id: busId } : undefined);
     return response.data;
   }
 
@@ -76,8 +77,9 @@ class ApiService {
     return this.client.defaults.baseURL;
   }
 
-  async sendMessage(canId, data, isExtended = false, isRemote = false) {
+  async sendMessage(canId, data, isExtended = false, isRemote = false, busId = null) {
     const response = await this.client.post('/send', {
+      bus_id: busId,
       can_id: canId,
       data: data,
       is_extended: isExtended,

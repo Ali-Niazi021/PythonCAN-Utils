@@ -420,6 +420,106 @@
   border: 1px solid #2a2a2a;
 }
 
+.connection-section-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bus-connection-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.bus-connection-card {
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  background: #101010;
+  padding: 12px;
+}
+
+.bus-connection-card.bus-bus1 {
+  box-shadow: inset 3px 0 0 rgba(220, 38, 38, 0.65);
+}
+
+.bus-connection-card.bus-bus2 {
+  box-shadow: inset 3px 0 0 rgba(249, 115, 22, 0.8);
+}
+
+.bus-connection-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.bus-pill,
+.message-bus-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.bus-pill.bus-bus1,
+.message-bus-badge.bus-bus1 {
+  background: rgba(220, 38, 38, 0.18);
+  color: #fca5a5;
+}
+
+.bus-pill.bus-bus2,
+.message-bus-badge.bus-bus2 {
+  background: rgba(249, 115, 22, 0.18);
+  color: #fdba74;
+}
+
+.bus-connection-state {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.bus-connection-state.connected {
+  color: #86efac;
+}
+
+.bus-connection-state.reconnecting {
+  color: #fde68a;
+}
+
+.bus-connection-state.disconnected {
+  color: #a3a3a3;
+}
+
+.bus-connection-info {
+  margin-top: 4px;
+}
+
+.bus-connection-reason {
+  align-items: flex-start;
+}
+
+.messages-table tbody tr.message-row.bus-bus1 {
+  box-shadow: inset 3px 0 0 rgba(220, 38, 38, 0.55);
+}
+
+.messages-table tbody tr.message-row.bus-bus2 {
+  box-shadow: inset 3px 0 0 rgba(249, 115, 22, 0.85);
+  background: rgba(249, 115, 22, 0.03);
+}
+
+.messages-table tbody tr.message-row.bus-bus2:hover {
+  background: rgba(249, 115, 22, 0.08);
+}
+
 .test-mode-pill {
   margin-bottom: 8px;
   padding: 6px 8px;
@@ -431,6 +531,44 @@
   background: linear-gradient(135deg, #f59e0b 0%, #facc15 100%);
   border: 1px solid #f59e0b;
   border-radius: 5px;
+}
+
+.message-id-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.transmit-target-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.transmit-target-row label {
+  color: #bdbdbd;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.transmit-target-row select {
+  min-width: 180px;
+  padding: 8px 12px;
+  background: #141414;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  color: #f5f5f5;
+}
+
+.transmit-target-sidebar {
+  margin-bottom: 0;
+}
+
+.transmit-target-hint {
+  color: #888;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .info-row {
@@ -450,6 +588,23 @@
   color: #f5f5f5;
   font-weight: 600;
   font-family: 'Consolas', 'Monaco', monospace;
+}
+
+.isolation-tag.bus-bus1 {
+  border-color: rgba(220, 38, 38, 0.3);
+}
+
+.isolation-tag.bus-bus2 {
+  border-color: rgba(249, 115, 22, 0.4);
+  background: rgba(249, 115, 22, 0.08);
+}
+
+.isolation-message-card.bus-bus1 {
+  box-shadow: inset 3px 0 0 rgba(220, 38, 38, 0.55);
+}
+
+.isolation-message-card.bus-bus2 {
+  box-shadow: inset 3px 0 0 rgba(249, 115, 22, 0.85);
 }
 
 .btn-block {
