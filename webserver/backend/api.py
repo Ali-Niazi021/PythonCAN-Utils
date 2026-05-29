@@ -53,7 +53,7 @@ except ImportError:
     print("Warning: PCAN_Driver not available")
 
 try:
-    from drivers.CANable_Driver import CANableDriver, CANableBaudRate, CANMessage as CANableMessage
+    from drivers.CANable_Driver import CANableDriver, SocketCANDriver, CANableBaudRate, CANMessage as CANableMessage
     CANABLE_AVAILABLE = True
 except ImportError:
     CANABLE_AVAILABLE = False
@@ -337,7 +337,7 @@ class CANBackend:
             bus_id: self._build_empty_bus_state(bus_id)
             for bus_id in BUS_IDS
         }
-        self.driver: Optional[Union[PCANDriver, CANableDriver, 'NetworkCANDriver']] = None
+        self.driver: Optional[Union[PCANDriver, CANableDriver, SocketCANDriver, 'NetworkCANDriver']] = None
         self.device_type: Optional[DeviceType] = None
         self.is_connected: bool = False
         self.dbc_database: Optional['cantools.database.Database'] = None
@@ -1298,7 +1298,6 @@ class CANBackend:
                 if not CANABLE_AVAILABLE:
                     raise Exception("CANable driver not available")
                 
-                driver = CANableDriver()
                 canable_baudrate = CANableBaudRate[baudrate]
                 
                 # Handle both formats: "Device X: Description" or just the index number
@@ -1313,8 +1312,21 @@ class CANBackend:
                         channel_index = int(channel)
                 else:
                     channel_index = int(channel)
+
+                canable_devices = CANableDriver().get_available_devices()
+                selected_device = next(
+                    (device for device in canable_devices if int(device.get('index', -1)) == channel_index),
+                    None,
+                )
+
+                if selected_device and selected_device.get('interface') == 'socketcan':
+                    driver = SocketCANDriver(interface_name=selected_device.get('channel'))
+                    connect_target: Union[int, str] = selected_device.get('channel') or channel_index
+                else:
+                    driver = CANableDriver()
+                    connect_target = channel_index
                 
-                if not driver.connect(channel_index, canable_baudrate):
+                if not driver.connect(connect_target, canable_baudrate):
                     raise Exception(f"Failed to connect CANable channel {channel_index}")
             
             elif device_type == DeviceType.NETWORK:

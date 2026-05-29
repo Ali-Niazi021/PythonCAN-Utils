@@ -16,7 +16,7 @@ Date: October 10, 2025
 
 from enum import Enum
 from dataclasses import dataclass
-from typing import Optional, List, Callable
+from typing import Optional, List, Callable, Union
 import time
 import threading
 import os
@@ -813,6 +813,116 @@ class CANableDriver:
         """Destructor - ensures cleanup."""
         if self._is_connected:
             self.disconnect()
+
+
+class SocketCANDriver(CANableDriver):
+    """Dedicated SocketCAN driver with explicit per-interface state."""
+
+    def __init__(self, interface_name: Optional[str] = None):
+        super().__init__()
+        self._socketcan_channel: Optional[str] = interface_name
+        self._channel_index: Optional[int] = None
+        self._last_socketcan_channel: Optional[str] = interface_name
+        self._last_channel_index: Optional[int] = None
+        self._last_baudrate: Optional[CANableBaudRate] = None
+        self._last_fd_mode: bool = False
+
+    def connect(self, channel: Union[str, int], baudrate: CANableBaudRate,
+                fd_mode: bool = False) -> bool:
+        """Connect to one Linux SocketCAN interface (for example can0/can1)."""
+        if self._is_connected:
+            print("Already connected to a SocketCAN interface. Disconnect first.")
+            return False
+
+        self._force_cleanup()
+
+        try:
+            if isinstance(channel, str) and channel.strip() and not channel.strip().isdigit():
+                iface_channel = channel.strip()
+                socketcan_ifaces = self._get_socketcan_interfaces()
+                channel_index = socketcan_ifaces.index(iface_channel) if iface_channel in socketcan_ifaces else None
+            else:
+                channel_index = int(channel)
+                socketcan_ifaces = self._get_socketcan_interfaces()
+                if channel_index < 0 or channel_index >= len(socketcan_ifaces):
+                    raise ValueError(f"Invalid SocketCAN channel index: {channel_index}")
+                iface_channel = socketcan_ifaces[channel_index]
+
+            self._bus = Bus(
+                interface='socketcan',
+                channel=iface_channel,
+                bitrate=baudrate.value,
+                fd=fd_mode,
+            )
+
+            self._channel = channel_index
+            self._channel_index = channel_index
+            self._socketcan_channel = iface_channel
+            self._baudrate = baudrate
+            self._fd_mode = fd_mode
+            self._is_connected = True
+            self._hardware_lost = False
+            self._device_info = {
+                'index': channel_index,
+                'interface': 'socketcan',
+                'channel': iface_channel,
+                'description': f"SocketCAN {iface_channel}",
+            }
+
+            self._last_channel_index = channel_index
+            self._last_socketcan_channel = iface_channel
+            self._last_baudrate = baudrate
+            self._last_fd_mode = fd_mode
+
+            print(f"[OK] Connected to {iface_channel} (socketcan) at {baudrate.value} bps")
+            return True
+        except Exception as e:
+            print(f"[ERROR] Failed to connect SocketCAN: {str(e)}")
+            if sys.platform == 'linux':
+                print("\n  Troubleshooting (Linux):")
+                print(f"  1. Ensure interface is UP: sudo ip link set {self._socketcan_channel or 'can0'} up type can bitrate {baudrate.value}")
+                print("  2. Check available interfaces: ip link show type can")
+            return False
+
+    def reconnect(self) -> bool:
+        """Reconnect using the last known SocketCAN interface."""
+        if self._last_baudrate is None:
+            print("[SocketCAN] Cannot reconnect: missing connection parameters")
+            return False
+
+        try:
+            if self._is_connected:
+                self.disconnect()
+        except Exception:
+            pass
+
+        time.sleep(0.2)
+        reconnect_target = self._last_socketcan_channel
+        if reconnect_target is None and self._last_channel_index is not None:
+            reconnect_target = self._last_channel_index
+        if reconnect_target is None:
+            print("[SocketCAN] Cannot reconnect: missing interface name")
+            return False
+
+        return self.connect(reconnect_target, self._last_baudrate, fd_mode=self._last_fd_mode)
+
+    def get_bus_status(self) -> dict:
+        """Get the current SocketCAN bus status."""
+        if not self._is_connected:
+            return {'connected': False, 'error': 'Not connected'}
+
+        status = {
+            'connected': True,
+            'channel': self._socketcan_channel or self._channel,
+            'baudrate': self._baudrate.name if self._baudrate else 'Unknown',
+            'interface': 'socketcan',
+            'status': 'OK'
+        }
+
+        if self._device_info:
+            status['device'] = self._device_info.get('description', 'Unknown')
+
+        return status
 
 
 # Example usage and testing

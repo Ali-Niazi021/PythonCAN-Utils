@@ -1,0 +1,24 @@
+{
+  "dbc_file": "dbcset-7a5450e06e63",
+  "items": [
+    {
+      "id": "1779915069396-0.3538234849805819",
+      "can_id": 150994943,
+      "data": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "is_extended": false,
+      "message_name": null,
+      "signals": null,
+      "description": "Custom message 0x8ffffff",
+      "cycle_time": 100
+    }
+  ]
+}

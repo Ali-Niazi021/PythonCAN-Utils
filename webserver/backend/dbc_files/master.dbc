@@ -139,7 +139,7 @@ BO_ 2147483867 HVC_VREF_Debug: 8 HVC
 
 BO_ 2148532431 VCU_Config: 8 VCU
  SG_ VCU_Config_Mux M : 0|8@1+ (1.0,0.0) [0.0|255.0] "" Vector__XXX
- SG_ VCU_Max_Torque m0 : 8|16@1- (0.1,0.0) [-230.0|230.0] "Nm" Vector__XXX
+ SG_ VCU_Max_Torque m0 : 8|16@1+ (1.0,0.0) [0.0|230.0] "Nm" Vector__XXX
  SG_ VCU_Motor_Direction m1 : 8|1@1+ (1.0,0.0) [0.0|1.0] "" Vector__XXX
  SG_ VCU_Regen_Enabled m2 : 8|1@1+ (1.0,0.0) [0.0|1.0] "" Vector__XXX
  SG_ VCU_ECHO_DAQ m3 : 8|1@1+ (1.0,0.0) [0.0|1.0] "" Vector__XXX
@@ -351,6 +351,10 @@ BO_ 2376335360 DBF_Pitot: 8 DBF
  SG_ DBF_Pitot_Raw_mV : 8|16@1- (0.001,0.0) [-1000.0|1000.0] "V" Vector__XXX
  SG_ DBF_Pitot_Filt_mV : 24|16@1- (0.001,0.0) [-1000.0|1000.0] "V" Vector__XXX
  SG_ DBF_Pitot_MPH : 40|16@1+ (0.01,0.0) [0.0|1000.0] "MPH" Vector__XXX
+
+BO_ 2376663040 DBF_ODO_LR: 8 DBF
+ SG_ FR_Odo : 0|32@1+ (1.0,0.0) [0.0|4294967295.0] "" Vector__XXX
+ SG_ FL_Odo : 32|32@1+ (1.0,0.0) [0.0|4294967295.0] "" Vector__XXX
 
 BO_ 2377121792 DBL_Status: 8 DBL
  SG_ DBL_Status_Timestamp : 0|32@1+ (1.0,0.0) [0.0|4294967295.0] "ms" Vector__XXX
