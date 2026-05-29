@@ -346,6 +346,8 @@ class CANBackend:
         
         # WebSocket connections
         self.active_connections: List[WebSocket] = []
+        self.websocket_last_seen: Dict[WebSocket, float] = {}
+        self.websocket_idle_timeout_seconds: float = 20.0
         
         # Message statistics
         self.message_count: int = 0
@@ -2833,7 +2835,7 @@ class CANBackend:
         """Broadcast message to all connected WebSocket clients"""
         disconnected = []
         
-        for connection in self.active_connections:
+        for connection in list(self.active_connections):
             try:
                 await connection.send_json(message)
             except Exception as e:
@@ -2849,12 +2851,22 @@ class CANBackend:
         """Add a WebSocket connection"""
         await websocket.accept()
         self.active_connections.append(websocket)
+        self.websocket_last_seen[websocket] = time.monotonic()
         print(f"[WS] WebSocket connected, total clients: {len(self.active_connections)}")
+
+    def touch_websocket_connection(self, websocket: WebSocket):
+        """Record the latest activity timestamp for a WebSocket connection."""
+        if websocket in self.active_connections:
+            self.websocket_last_seen[websocket] = time.monotonic()
     
     def remove_websocket_connection(self, websocket: WebSocket):
         """Remove a WebSocket connection"""
+        removed = False
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
+            removed = True
+        self.websocket_last_seen.pop(websocket, None)
+        if removed:
             print(f"[WS] WebSocket disconnected, remaining clients: {len(self.active_connections)}")
 
 
@@ -3477,9 +3489,23 @@ async def websocket_can_messages(websocket: WebSocket):
     try:
         while True:
             # Keep connection alive and handle any client messages
-            data = await websocket.receive_text()
+            data = await asyncio.wait_for(
+                websocket.receive_text(),
+                timeout=backend.websocket_idle_timeout_seconds,
+            )
+            backend.touch_websocket_connection(websocket)
             # Echo back for heartbeat
             await websocket.send_json({"type": "heartbeat", "timestamp": datetime.now().isoformat()})
+    except asyncio.TimeoutError:
+        print(
+            f"[WS] Closing idle WebSocket after "
+            f"{backend.websocket_idle_timeout_seconds:.0f}s without client activity"
+        )
+        backend.remove_websocket_connection(websocket)
+        try:
+            await websocket.close(code=1001, reason="client heartbeat timeout")
+        except Exception:
+            pass
     except WebSocketDisconnect:
         backend.remove_websocket_connection(websocket)
         print("WebSocket client disconnected")
