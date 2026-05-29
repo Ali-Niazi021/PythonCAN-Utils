@@ -347,8 +347,10 @@ def start_frontend(inherit_logs=False):
     stderr_target = None if inherit_logs else subprocess.DEVNULL
     
     env = os.environ.copy()
+    env['HOST'] = '0.0.0.0'
     env['PORT'] = '3001'
     env['BROWSER'] = 'none'
+    env['DANGEROUSLY_DISABLE_HOST_CHECK'] = 'true'
     
     # Start frontend - use DEVNULL
     if sys.platform == 'win32':

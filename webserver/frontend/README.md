@@ -105,13 +105,15 @@ frontend/
 
 ### Backend URL
 
-By default, the frontend connects to `http://localhost:8000`. To change this:
+By default, the frontend uses the same host and port that served the page. In development, the React dev server proxies API and WebSocket traffic to the FastAPI backend on `127.0.0.1:8000`, so remote clients only need access to the frontend port.
 
-Create a `.env` file in the frontend directory:
+To use a separate backend URL, create a `.env` file in the frontend directory:
+
+If only `REACT_APP_API_URL` is set, the WebSocket URL is derived from it automatically. Set `REACT_APP_WS_URL` only when it needs to be different. The default WebSocket path is `/api/ws/can` to avoid colliding with the React dev server's own `/ws` endpoint.
 
 ```bash
 REACT_APP_API_URL=http://your-backend-url:8000
-REACT_APP_WS_URL=ws://your-backend-url:8000/ws/can
+REACT_APP_WS_URL=ws://your-backend-url:8000/api/ws/can
 ```
 
 ### CORS

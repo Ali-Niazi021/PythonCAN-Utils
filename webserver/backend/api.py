@@ -19,6 +19,7 @@ import random
 import time
 import math
 import hashlib
+import threading
 from enum import Enum
 import atexit
 
@@ -348,6 +349,11 @@ class CANBackend:
         self.active_connections: List[WebSocket] = []
         self.websocket_last_seen: Dict[WebSocket, float] = {}
         self.websocket_idle_timeout_seconds: float = 20.0
+        self.websocket_batch_interval_seconds: float = 0.05
+        self._pending_websocket_messages: List[dict] = []
+        self._websocket_flush_lock = threading.Lock()
+        self._websocket_flush_requested: bool = False
+        self._websocket_flush_task: Optional[asyncio.Task] = None
         
         # Message statistics
         self.message_count: int = 0
@@ -2756,6 +2762,37 @@ class CANBackend:
             self._on_message_received(msg, bus_id=bus_id)
         return _callback
 
+    def _ensure_websocket_flush_task(self):
+        """Ensure the websocket batch flush task is running on the event loop."""
+        if self._websocket_flush_task is None or self._websocket_flush_task.done():
+            self._websocket_flush_task = asyncio.create_task(self._flush_websocket_messages())
+
+    async def _flush_websocket_messages(self):
+        """Flush queued CAN messages to websocket clients in small batches."""
+        try:
+            while True:
+                await asyncio.sleep(self.websocket_batch_interval_seconds)
+
+                with self._websocket_flush_lock:
+                    batch = self._pending_websocket_messages
+                    self._pending_websocket_messages = []
+
+                if batch:
+                    await self.broadcast_message(batch)
+                    continue
+
+                with self._websocket_flush_lock:
+                    if self._pending_websocket_messages:
+                        continue
+                    self._websocket_flush_requested = False
+                    self._websocket_flush_task = None
+                    return
+        finally:
+            with self._websocket_flush_lock:
+                if not self._pending_websocket_messages:
+                    self._websocket_flush_requested = False
+                    self._websocket_flush_task = None
+
     def _on_message_received(self, msg, bus_id: Optional[str] = None):
         """Callback for received CAN messages - broadcasts to all WebSocket clients
         
@@ -2781,6 +2818,9 @@ class CANBackend:
         # Debug: Print first few messages
         if message_count <= 5:
             print(f"[RX][{target_bus_id or 'unknown'}] Message #{message_count}: ID=0x{msg.id:X}, Extended={msg.is_extended}, DLC={msg.dlc}, Data={msg.data.hex()}")
+
+        if not self.active_connections:
+            return
         
         # Check for server-decoded data (Network driver with DBC loaded on server)
         if hasattr(msg, 'server_decoded') and msg.server_decoded:
@@ -2819,14 +2859,19 @@ class CANBackend:
             if message_count <= 2:
                 print(f"[RX] No DBC database available for decoding")
         
-        # Schedule broadcast on the event loop (if available)
+        # Queue websocket broadcast on the event loop (if available)
         if self.loop and self.loop.is_running():
+            with self._websocket_flush_lock:
+                self._pending_websocket_messages.append(message_data)
+                should_schedule = not self._websocket_flush_requested
+                if should_schedule:
+                    self._websocket_flush_requested = True
+
             if message_count <= 5:
-                print(f"[RX] Broadcasting to {len(self.active_connections)} clients, loop running: {self.loop.is_running()}")
-            asyncio.run_coroutine_threadsafe(
-                self.broadcast_message(message_data),
-                self.loop
-            )
+                print(f"[RX] Queueing websocket batch for {len(self.active_connections)} clients")
+
+            if should_schedule:
+                self.loop.call_soon_threadsafe(self._ensure_websocket_flush_task)
         else:
             if message_count <= 5:
                 print(f"[RX] NOT broadcasting - loop={self.loop}, running={self.loop.is_running() if self.loop else 'N/A'}")
@@ -3470,6 +3515,7 @@ async def flash_firmware(file: UploadFile = File(...), module_number: int = Form
 # WebSocket Endpoint for Real-time CAN Messages
 # ============================================================================
 
+@app.websocket("/api/ws/can")
 @app.websocket("/ws/can")
 async def websocket_can_messages(websocket: WebSocket):
     """WebSocket endpoint for real-time CAN message streaming"""
