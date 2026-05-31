@@ -5,18 +5,40 @@ import {
 import { useNowTick, isTimestampStale } from '../hooks/useStaleness';
 import './VCUDashboard.css';
 
-const MASTER_DBC_FILENAME = 'master.dbc';
 const SET_VCU_CONFIG_ID = 0x800000CF;
 
-const VCU_MESSAGE_NAMES = new Set([
-  'VCU_Summary',
-  'VCU_APPS_Voltages',
-  'VCU_APPS_Values',
-  'VCU_BSE',
-  'VCU_Dead_Car',
-  'VCU_CAN_Health',
-  'VCU_Config',
-]);
+const VCU_FRAME_SIGNALS = {
+  VCU_Summary: ['VCU_State', 'VCU_Speed', 'VCU_Buzzer_State', 'VCU_RTD_Active', 'VCU_Red_Car'],
+  VCU_APPS_Voltages: ['VCU_APPS1_Filt_mV', 'VCU_APPS1_Raw_mV', 'VCU_APPS2_Filt_mV', 'VCU_APPS2_Raw_mV', 'VCU_BSE_Filt_mV', 'VCU_BSE_Raw_mV'],
+  VCU_APPS_Values: ['VCU_APPS1_Value', 'VCU_APPS2_Value', 'VCU_APPS_Value', 'VCU_APPS_Valid', 'VCU_APPS_Implausible'],
+  VCU_BSE: ['VCU_BSE_PSI', 'VCU_BSE_Valid', 'VCU_BSE_Stale', 'VCU_BSE_ADC_Err', 'VCU_BSE_Out_of_Range'],
+  VCU_Dead_Car: ['VCU_Dead_HVC_Msg_Valid', 'VCU_Dead_IMD_OK', 'VCU_Dead_BMS_OK', 'VCU_Dead_SDC_OK'],
+  VCU_CAN_Health: ['VCU_Controls_Passive_Err', 'VCU_Controls_Bus_Off', 'VCU_DAQ_Passive_Err', 'VCU_DAQ_Bus_Off', 'VCU_Controls_Status', 'VCU_DAQ_Status'],
+  VCU_Config: [
+    'VCU_Max_Torque',
+    'VCU_Motor_Direction',
+    'VCU_Regen_Enabled',
+    'VCU_ECHO_DAQ',
+    'VCU_Ignore_RTD_Switch',
+    'VCU_Ignore_RTD_Brakes',
+    'VCU_Use_APPS1_Only',
+    'VCU_Use_APPS2_Only',
+    'VCU_Ignore_APPS_Errs',
+    'VCU_Ignore_BSE_Errs',
+    'VCU_Ignore_SDC',
+    'VCU_Ignore_Brake_Plausibility',
+    'VCU_Always_Green',
+    'VCU_Wheel_Diameter',
+    'VCU_TC_Enabled',
+    'VCU_TC_Target_Slip',
+    'VCU_TC_Kp',
+    'VCU_TC_Ki',
+    'VCU_TC_Kd',
+    'VCU_TC_Min_Front_RPM',
+  ],
+};
+
+const VCU_SIGNAL_NAMES = new Set(Object.values(VCU_FRAME_SIGNALS).flat());
 
 const STATE_LABELS = {
   0: 'LOADING',
@@ -47,6 +69,23 @@ const STATUS_LABELS = {
   15: 'UNKNOWN',
 };
 
+const BOOLEAN_LABELS = { 0: 'FALSE', 1: 'TRUE' };
+const DIRECTION_LABELS = { 0: 'REVERSE', 1: 'FORWARD' };
+
+const CONFIG_GROUP_OPTIONS = [
+  { value: 0, label: 'MAX_TORQUE' },
+  { value: 1, label: 'MOTOR_DIRECTION' },
+  { value: 2, label: 'REGEN_ENABLED' },
+  { value: 3, label: 'DEBUG_DEFINES' },
+  { value: 4, label: 'WHEEL_DIAMETER' },
+  { value: 5, label: 'TRACTION_CONTROL_ENABLED' },
+  { value: 6, label: 'TRACTION_CONTROL_TARGET_SLIP' },
+  { value: 7, label: 'TRACTION_CONTROL_KP' },
+  { value: 8, label: 'TRACTION_CONTROL_KI' },
+  { value: 9, label: 'TRACTION_CONTROL_KD' },
+  { value: 10, label: 'TRACTION_CONTROL_MIN_FRONT_RPM' },
+];
+
 const DEBUG_FIELDS = [
   ['echoDaq', 'VCU_ECHO_DAQ', 'SET_VCU_ECHO_DAQ', 'Echo DAQ'],
   ['ignoreRtdSwitch', 'VCU_Ignore_RTD_Switch', 'SET_VCU_Ignore_RTD_Switch', 'Ignore RTD switch'],
@@ -58,6 +97,19 @@ const DEBUG_FIELDS = [
   ['ignoreSdc', 'VCU_Ignore_SDC', 'SET_VCU_Ignore_SDC', 'Ignore SDC'],
   ['ignoreBrakePlausibility', 'VCU_Ignore_Brake_Plausibility', 'SET_VCU_Ignore_Brake_Plausibility', 'Ignore brake plausibility'],
   ['alwaysGreen', 'VCU_Always_Green', 'SET_VCU_Always_Green', 'Always green'],
+];
+
+const CONFIG_READBACK_FIELDS = [
+  ['VCU_Max_Torque', 'Max torque'],
+  ['VCU_Motor_Direction', 'Motor direction', DIRECTION_LABELS],
+  ['VCU_Regen_Enabled', 'Regen enabled', BOOLEAN_LABELS],
+  ['VCU_Wheel_Diameter', 'Wheel diameter'],
+  ['VCU_TC_Enabled', 'Traction control enabled', BOOLEAN_LABELS],
+  ['VCU_TC_Target_Slip', 'Target slip'],
+  ['VCU_TC_Kp', 'Traction control Kp'],
+  ['VCU_TC_Ki', 'Traction control Ki'],
+  ['VCU_TC_Kd', 'Traction control Kd'],
+  ['VCU_TC_Min_Front_RPM', 'Min front RPM'],
 ];
 
 const getNumeric = (signal) => {
@@ -111,6 +163,12 @@ const freshnessLabel = (timestamp, nowMs) => {
   return ageS < 60 ? `${ageS.toFixed(1)}s ago` : `${Math.round(ageS)}s ago`;
 };
 
+const clampNumber = (value, min, max, fallback = min) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(max, Math.max(min, numeric));
+};
+
 const buildConfigFrame = (mux, config) => {
   const bytes = new Uint8Array(8);
   bytes[0] = mux;
@@ -127,7 +185,37 @@ const buildConfigFrame = (mux, config) => {
     bytes[1] = packed & 0xFF;
     bytes[2] = (packed >> 8) & 0xFF;
   }
+  if (mux === 4) view.setUint16(1, Math.round(clampNumber(config.wheelDiameterIn, 8, 30, 18)), true);
+  if (mux === 5) bytes[1] = config.tcEnabled ? 1 : 0;
+  if (mux === 6) view.setUint16(1, Math.round(clampNumber(config.tcTargetSlip, 1, 5, 1) * 1000), true);
+  if (mux === 7) view.setUint16(1, Math.round(clampNumber(config.tcKp, 0, 32.767, 0) * 1000), true);
+  if (mux === 8) view.setUint16(1, Math.round(clampNumber(config.tcKi, 0, 32.767, 0) * 1000), true);
+  if (mux === 9) view.setUint16(1, Math.round(clampNumber(config.tcKd, 0, 32.767, 0) * 1000), true);
+  if (mux === 10) view.setUint16(1, Math.round(clampNumber(config.tcMinFrontRpm, 0, 32767, 0)), true);
   return Array.from(bytes);
+};
+
+const getCanonicalFrameName = (decoded) => {
+  const messageName = decoded?.message_name;
+  if (messageName && VCU_FRAME_SIGNALS[messageName]) return messageName;
+  if (!decoded?.signals) return null;
+
+  const signalNames = Object.keys(decoded.signals);
+  let bestFrameName = null;
+  let bestOverlap = 0;
+
+  Object.entries(VCU_FRAME_SIGNALS).forEach(([frameName, expectedSignals]) => {
+    const overlap = expectedSignals.reduce(
+      (count, signalName) => count + (signalNames.includes(signalName) ? 1 : 0),
+      0,
+    );
+    if (overlap > bestOverlap) {
+      bestOverlap = overlap;
+      bestFrameName = frameName;
+    }
+  });
+
+  return bestOverlap > 0 ? bestFrameName : null;
 };
 
 function Freshness({ timestamp, nowMs, staleTimeoutMs }) {
@@ -178,35 +266,58 @@ function VCUDashboard({ messages, dbcFiles = [], onSendMessage, staleTimeoutMs =
     ignoreSdc: false,
     ignoreBrakePlausibility: false,
     alwaysGreen: false,
+    wheelDiameterIn: 18,
+    tcEnabled: false,
+    tcTargetSlip: 1,
+    tcKp: 0,
+    tcKi: 0,
+    tcKd: 0,
+    tcMinFrontRpm: 0,
   });
   const [sendStatus, setSendStatus] = useState(null);
   const [sendBusy, setSendBusy] = useState(false);
+  const enabledDbcCount = dbcFiles.filter((file) => file.enabled).length;
 
-  const masterDbc = dbcFiles.find((file) => file.filename === MASTER_DBC_FILENAME) || null;
-  const masterDbcEnabled = Boolean(masterDbc?.enabled);
-
-  const { frames, latestSignals } = useMemo(() => {
+  const { frames, latestSignals, matchedSourceDbc } = useMemo(() => {
     const frameMap = {};
     const signalMap = new Map();
+    let latestMatchedSourceDbc = null;
+    let latestMatchedTimestamp = -1;
+
     messages.forEach((msg) => {
       const decoded = msg?.decoded;
-      const name = decoded?.message_name;
-      if (!decoded?.signals || !VCU_MESSAGE_NAMES.has(name)) return;
-      if (decoded.source_dbc && decoded.source_dbc !== MASTER_DBC_FILENAME) return;
+      if (!decoded?.signals) return;
+
+      const frameName = getCanonicalFrameName(decoded);
+      const signalEntries = Object.entries(decoded.signals).filter(([signalName]) => VCU_SIGNAL_NAMES.has(signalName));
+      if (!frameName && signalEntries.length === 0) return;
+
       const timestamp = typeof msg.timestamp === 'number' ? msg.timestamp : 0;
-      if (!frameMap[name] || timestamp >= frameMap[name].timestamp) {
-        frameMap[name] = { signals: decoded.signals, timestamp };
+      if (frameName && (!frameMap[frameName] || timestamp >= frameMap[frameName].timestamp)) {
+        frameMap[frameName] = { signals: decoded.signals, timestamp };
       }
-      Object.entries(decoded.signals).forEach(([signalName, signal]) => {
+
+      signalEntries.forEach(([signalName, signal]) => {
         const previous = signalMap.get(signalName);
         if (!previous || timestamp >= previous.timestamp) signalMap.set(signalName, { signal, timestamp });
       });
+
+      if (decoded.source_dbc && timestamp >= latestMatchedTimestamp) {
+        latestMatchedTimestamp = timestamp;
+        latestMatchedSourceDbc = decoded.source_dbc;
+      }
     });
-    return { frames: frameMap, latestSignals: signalMap };
+
+    return { frames: frameMap, latestSignals: signalMap, matchedSourceDbc: latestMatchedSourceDbc };
   }, [messages]);
 
   const getSignal = (name) => latestSignals.get(name)?.signal;
-  const hasAnyData = Object.keys(frames).length > 0;
+  const hasAnyData = latestSignals.size > 0;
+  const dbcStatusText = matchedSourceDbc
+    ? `Matched ${matchedSourceDbc}`
+    : enabledDbcCount > 0
+      ? 'Waiting for VCU signals'
+      : 'No DBC enabled';
 
   const apps1 = getNumeric(getSignal('VCU_APPS1_Value'));
   const apps2 = getNumeric(getSignal('VCU_APPS2_Value'));
@@ -245,24 +356,29 @@ function VCUDashboard({ messages, dbcFiles = [], onSendMessage, staleTimeoutMs =
       <div className="vcu-header">
         <div>
           <h2><Gauge size={22} /> VCU Dashboard</h2>
-          <p>Real-time VCU telemetry decoded from {MASTER_DBC_FILENAME}.</p>
+          <p>Real-time VCU telemetry matched by signal name from any decoded DBC.</p>
         </div>
         <div className="vcu-header-actions">
-          <span className={`vcu-dbc-pill ${masterDbcEnabled ? 'enabled' : 'disabled'}`}>
-            {masterDbcEnabled ? 'DBC enabled' : masterDbc ? 'DBC disabled' : 'DBC missing'}
+          <span className={`vcu-dbc-pill ${matchedSourceDbc ? 'enabled' : 'disabled'}`}>
+            {dbcStatusText}
           </span>
           {sendStatus && <span className={`vcu-status-pill ${sendStatus.type}`}>{sendStatus.text}</span>}
         </div>
       </div>
 
-      {!masterDbc && <div className="vcu-notice">master.dbc is not in the uploaded DBC list.</div>}
-      {masterDbc && !masterDbcEnabled && <div className="vcu-notice">master.dbc is uploaded but disabled.</div>}
+      {!matchedSourceDbc && (
+        <div className="vcu-notice">
+          {enabledDbcCount > 0
+            ? 'Waiting for decoded VCU signals from an enabled DBC.'
+            : 'Enable a DBC that contains the expected VCU signals to populate this dashboard.'}
+        </div>
+      )}
       {!hasAnyData && (
         <div className="vcu-empty">
           <AlertTriangle size={28} />
           <div>
             <h3>No VCU frames received yet</h3>
-            <p>Connect to CAN with master.dbc enabled to populate this dashboard.</p>
+            <p>Connect to CAN with a DBC that exposes the expected VCU signal names.</p>
           </div>
         </div>
       )}
@@ -364,21 +480,20 @@ function VCUDashboard({ messages, dbcFiles = [], onSendMessage, staleTimeoutMs =
         <div className="vcu-card-header"><Settings size={18} /><h3>Config</h3><Freshness timestamp={frames.VCU_Config?.timestamp} nowMs={nowMs} staleTimeoutMs={staleTimeoutMs} /></div>
         <div className="vcu-config-grid">
           <div className="vcu-readback-grid">
-            <span>Max torque <strong>{getDisplay(getSignal('VCU_Max_Torque'))}</strong></span>
-            <span>Motor direction <strong>{enumLabel(getSignal('VCU_Motor_Direction'), { 0: 'REVERSE', 1: 'FORWARD' })}</strong></span>
-            <span>Regen enabled <strong>{enumLabel(getSignal('VCU_Regen_Enabled'), { 0: 'FALSE', 1: 'TRUE' })}</strong></span>
+            {CONFIG_READBACK_FIELDS.map(([signalName, label, labels]) => (
+              <span key={signalName}>{label} <strong>{labels ? enumLabel(getSignal(signalName), labels) : getDisplay(getSignal(signalName))}</strong></span>
+            ))}
             {DEBUG_FIELDS.map(([, readSignal, , label]) => (
-              <span key={readSignal}>{label} <strong>{enumLabel(getSignal(readSignal), { 0: 'FALSE', 1: 'TRUE' })}</strong></span>
+              <span key={readSignal}>{label} <strong>{enumLabel(getSignal(readSignal), BOOLEAN_LABELS)}</strong></span>
             ))}
           </div>
           <div className="vcu-sender">
             <label>
               Config group
               <select value={mux} onChange={(event) => setMux(Number(event.target.value))}>
-                <option value={0}>MAX_TORQUE</option>
-                <option value={1}>MOTOR_DIRECTION</option>
-                <option value={2}>REGEN_ENABLED</option>
-                <option value={3}>DEBUG_DEFINES</option>
+                {CONFIG_GROUP_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
               </select>
             </label>
             {mux === 0 && (
@@ -411,6 +526,48 @@ function VCUDashboard({ messages, dbcFiles = [], onSendMessage, staleTimeoutMs =
                   </label>
                 ))}
               </div>
+            )}
+            {mux === 4 && (
+              <label>
+                Wheel diameter (in)
+                <input type="number" min="8" max="30" step="1" value={config.wheelDiameterIn} onChange={(event) => setConfig((prev) => ({ ...prev, wheelDiameterIn: event.target.value }))} />
+              </label>
+            )}
+            {mux === 5 && (
+              <label className="vcu-checkbox">
+                <input type="checkbox" checked={config.tcEnabled} onChange={(event) => setConfig((prev) => ({ ...prev, tcEnabled: event.target.checked }))} />
+                Traction control enabled
+              </label>
+            )}
+            {mux === 6 && (
+              <label>
+                Target slip
+                <input type="number" min="1" max="5" step="0.001" value={config.tcTargetSlip} onChange={(event) => setConfig((prev) => ({ ...prev, tcTargetSlip: event.target.value }))} />
+              </label>
+            )}
+            {mux === 7 && (
+              <label>
+                Traction control Kp
+                <input type="number" min="0" max="32.767" step="0.001" value={config.tcKp} onChange={(event) => setConfig((prev) => ({ ...prev, tcKp: event.target.value }))} />
+              </label>
+            )}
+            {mux === 8 && (
+              <label>
+                Traction control Ki
+                <input type="number" min="0" max="32.767" step="0.001" value={config.tcKi} onChange={(event) => setConfig((prev) => ({ ...prev, tcKi: event.target.value }))} />
+              </label>
+            )}
+            {mux === 9 && (
+              <label>
+                Traction control Kd
+                <input type="number" min="0" max="32.767" step="0.001" value={config.tcKd} onChange={(event) => setConfig((prev) => ({ ...prev, tcKd: event.target.value }))} />
+              </label>
+            )}
+            {mux === 10 && (
+              <label>
+                Min front RPM
+                <input type="number" min="0" max="32767" step="1" value={config.tcMinFrontRpm} onChange={(event) => setConfig((prev) => ({ ...prev, tcMinFrontRpm: event.target.value }))} />
+              </label>
             )}
             <button type="button" onClick={handleSendConfig} disabled={sendBusy}>
               {sendBusy ? 'Sending...' : 'Send Config'}

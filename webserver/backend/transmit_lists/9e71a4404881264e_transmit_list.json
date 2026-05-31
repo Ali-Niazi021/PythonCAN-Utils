@@ -1,0 +1,53 @@
+{
+  "dbc_file": "dbcset-8a9d274eb302",
+  "items": [
+    {
+      "id": "1780192698848-0.10712352311638995",
+      "can_id": 1048783,
+      "data": [
+        3,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "is_extended": true,
+      "message_name": "VCU_Config",
+      "signals": {
+        "VCU_Config_Mux": 3,
+        "VCU_Max_Torque": 0,
+        "VCU_Motor_Direction": 0,
+        "VCU_Regen_Enabled": 0,
+        "VCU_ECHO_DAQ": 1
+      },
+      "description": "debug defines all 0",
+      "cycle_time": null
+    },
+    {
+      "id": "1780194562431-0.9615507940587071",
+      "can_id": 4194800,
+      "data": [
+        3,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "is_extended": true,
+      "message_name": "IO_Summary",
+      "signals": {
+        "SDC_Closed": 1,
+        "IMD_Ok": 1,
+        "BMS_Fault_Ok": 0,
+        "Ref_Temp_C": 0
+      },
+      "description": "DBC: IO_Summary",
+      "cycle_time": 10
+    }
+  ]
+}

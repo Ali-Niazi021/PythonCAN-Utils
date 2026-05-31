@@ -17,11 +17,15 @@
       "enabled": true
     },
     {
-      "filename": "master.dbc",
+      "filename": "can9-database-01.09.dbc",
       "enabled": true
     },
     {
-      "filename": "can9-database-01.09.dbc",
+      "filename": "VCU.dbc",
+      "enabled": true
+    },
+    {
+      "filename": "master.dbc",
       "enabled": true
     }
   ]
