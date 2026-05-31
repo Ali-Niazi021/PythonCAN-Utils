@@ -1243,6 +1243,15 @@ function CANExplorer({
                 MOBO Dashboard
               </button>
             </div>
+            <div className="sidebar-menu-group">
+              <div className="sidebar-menu-header">Driving</div>
+              <button
+                className={`sidebar-tab submenu ${activeTab === 'driving-dashboard' ? 'active' : ''}`}
+                onClick={() => onTabChange('driving-dashboard')}
+              >
+                Driving Dashboard
+              </button>
+            </div>
           </div>
         </div>
 

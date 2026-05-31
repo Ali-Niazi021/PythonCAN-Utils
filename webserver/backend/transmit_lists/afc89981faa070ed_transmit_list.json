@@ -1,0 +1,28 @@
+{
+  "dbc_file": "dbcset-befcde8b2642",
+  "items": [
+    {
+      "id": "1780204045030-0.05964540344125524",
+      "can_id": 4194800,
+      "data": [
+        2,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "is_extended": true,
+      "message_name": "IO_Summary",
+      "signals": {
+        "SDC_Closed": 0,
+        "IMD_Ok": 1,
+        "BMS_Fault_Ok": 0,
+        "Ref_Temp_C": 0
+      },
+      "description": "DBC: IO_Summary",
+      "cycle_time": 100
+    }
+  ]
+}

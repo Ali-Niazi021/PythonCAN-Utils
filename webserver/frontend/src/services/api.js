@@ -179,6 +179,18 @@ class ApiService {
     return response.data;
   }
 
+  async getDrivingDashboardConfig() {
+    const response = await this.client.get('/driving_dashboard/config');
+    return response.data;
+  }
+
+  async saveDrivingDashboardConfig(widgets) {
+    const response = await this.client.post('/driving_dashboard/config', {
+      widgets: widgets,
+    });
+    return response.data;
+  }
+
   async encodeMessage(messageName, signals) {
     const response = await this.client.post('/dbc/encode_message', null, {
       params: { 

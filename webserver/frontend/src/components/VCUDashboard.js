@@ -35,6 +35,8 @@ const VCU_FRAME_SIGNALS = {
     'VCU_TC_Ki',
     'VCU_TC_Kd',
     'VCU_TC_Min_Front_RPM',
+    'VCU_Power_Limit_Enabled',
+    'VCU_Power_Cap_kW',
   ],
 };
 
@@ -84,6 +86,8 @@ const CONFIG_GROUP_OPTIONS = [
   { value: 8, label: 'TRACTION_CONTROL_KI' },
   { value: 9, label: 'TRACTION_CONTROL_KD' },
   { value: 10, label: 'TRACTION_CONTROL_MIN_FRONT_RPM' },
+  { value: 11, label: 'POWER_LIMIT_ENABLED' },
+  { value: 12, label: 'POWER_CAP_KW' },
 ];
 
 const DEBUG_FIELDS = [
@@ -110,6 +114,8 @@ const CONFIG_READBACK_FIELDS = [
   ['VCU_TC_Ki', 'Traction control Ki'],
   ['VCU_TC_Kd', 'Traction control Kd'],
   ['VCU_TC_Min_Front_RPM', 'Min front RPM'],
+  ['VCU_Power_Limit_Enabled', 'Power limit enabled', BOOLEAN_LABELS],
+  ['VCU_Power_Cap_kW', 'Power cap'],
 ];
 
 const getNumeric = (signal) => {
@@ -192,6 +198,8 @@ const buildConfigFrame = (mux, config) => {
   if (mux === 8) view.setUint16(1, Math.round(clampNumber(config.tcKi, 0, 32.767, 0) * 1000), true);
   if (mux === 9) view.setUint16(1, Math.round(clampNumber(config.tcKd, 0, 32.767, 0) * 1000), true);
   if (mux === 10) view.setUint16(1, Math.round(clampNumber(config.tcMinFrontRpm, 0, 32767, 0)), true);
+  if (mux === 11) bytes[1] = config.powerLimitEnabled ? 1 : 0;
+  if (mux === 12) view.setUint16(1, Math.round(clampNumber(config.powerCapKw, 5, 100, 50)), true);
   return Array.from(bytes);
 };
 
@@ -273,6 +281,8 @@ function VCUDashboard({ messages, dbcFiles = [], onSendMessage, staleTimeoutMs =
     tcKi: 0,
     tcKd: 0,
     tcMinFrontRpm: 0,
+    powerLimitEnabled: false,
+    powerCapKw: 50,
   });
   const [sendStatus, setSendStatus] = useState(null);
   const [sendBusy, setSendBusy] = useState(false);
@@ -567,6 +577,18 @@ function VCUDashboard({ messages, dbcFiles = [], onSendMessage, staleTimeoutMs =
               <label>
                 Min front RPM
                 <input type="number" min="0" max="32767" step="1" value={config.tcMinFrontRpm} onChange={(event) => setConfig((prev) => ({ ...prev, tcMinFrontRpm: event.target.value }))} />
+              </label>
+            )}
+            {mux === 11 && (
+              <label className="vcu-checkbox">
+                <input type="checkbox" checked={config.powerLimitEnabled} onChange={(event) => setConfig((prev) => ({ ...prev, powerLimitEnabled: event.target.checked }))} />
+                Power limit enabled
+              </label>
+            )}
+            {mux === 12 && (
+              <label>
+                Power cap (kW)
+                <input type="number" min="5" max="100" step="1" value={config.powerCapKw} onChange={(event) => setConfig((prev) => ({ ...prev, powerCapKw: event.target.value }))} />
               </label>
             )}
             <button type="button" onClick={handleSendConfig} disabled={sendBusy}>

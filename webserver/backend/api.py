@@ -45,6 +45,9 @@ DBC_CONFIG_FILE = DBC_DIR / "dbc_config.json"
 TRANSMIT_LISTS_DIR = backend_dir / "transmit_lists"
 TRANSMIT_LISTS_DIR.mkdir(exist_ok=True)
 
+# Driving dashboard configuration (persisted layout/widgets)
+DRIVING_DASHBOARD_CONFIG_FILE = backend_dir / "driving_dashboard_config.json"
+
 # Import CAN drivers
 try:
     from drivers.PCAN_Driver import PCANDriver, PCANChannel, PCANBaudRate, CANMessage as PCANMessage
@@ -280,6 +283,28 @@ class SaveTransmitListRequest(BaseModel):
     """Request to save transmit list"""
     items: List[TransmitListItem]
     dbc_file: str
+
+
+class DrivingWidgetConfig(BaseModel):
+    """Single configurable widget on the Driving dashboard."""
+    id: str
+    signal_name: str
+    source_dbc: Optional[str] = None  # DBC the signal metadata is sourced from
+    label: Optional[str] = None  # Custom display label (defaults to signal name)
+    display_type: str = 'auto'  # 'auto' | 'number' | 'gauge' | 'boolean' | 'enum'
+    decimals: Optional[int] = None  # Decimal places for numeric display
+    size: str = 'medium'  # 'small' | 'medium' | 'large'
+
+
+class DrivingDashboardConfigRequest(BaseModel):
+    """Request to persist the Driving dashboard layout."""
+    widgets: List[DrivingWidgetConfig] = []
+
+
+class DrivingDashboardConfigResponse(BaseModel):
+    """Response containing the persisted Driving dashboard layout."""
+    success: bool
+    widgets: List[DrivingWidgetConfig] = []
 
 
 class DBCMessageInfo(BaseModel):
@@ -3383,6 +3408,35 @@ async def load_transmit_list(dbc_file: str):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load transmit list: {str(e)}")
+
+
+@app.get("/driving_dashboard/config", response_model=DrivingDashboardConfigResponse)
+async def get_driving_dashboard_config():
+    """Load the persisted Driving dashboard widget layout."""
+    try:
+        if not DRIVING_DASHBOARD_CONFIG_FILE.exists():
+            return DrivingDashboardConfigResponse(success=True, widgets=[])
+
+        with open(DRIVING_DASHBOARD_CONFIG_FILE, 'r') as f:
+            data = json.load(f)
+
+        widgets = [DrivingWidgetConfig(**w) for w in data.get("widgets", [])]
+        return DrivingDashboardConfigResponse(success=True, widgets=widgets)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load driving dashboard config: {str(e)}")
+
+
+@app.post("/driving_dashboard/config", response_model=DrivingDashboardConfigResponse)
+async def save_driving_dashboard_config(request: DrivingDashboardConfigRequest):
+    """Persist the Driving dashboard widget layout to a local JSON file."""
+    try:
+        widgets_data = [widget.dict() for widget in request.widgets]
+        with open(DRIVING_DASHBOARD_CONFIG_FILE, 'w') as f:
+            json.dump({"widgets": widgets_data}, f, indent=2)
+
+        return DrivingDashboardConfigResponse(success=True, widgets=request.widgets)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save driving dashboard config: {str(e)}")
 
 
 @app.post("/dbc/encode_message")
