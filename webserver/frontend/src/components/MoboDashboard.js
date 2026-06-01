@@ -133,7 +133,10 @@ const getRelaySignal = (signals, channel, kind) => getSignalByNames(
   channel[`legacy${kind[0].toUpperCase()}${kind.slice(1)}`],
 );
 
-const getSafetyFault = (signal) => isBitSet(signal);
+const getSafetyFault = (signal) => {
+  const value = isBitSet(signal);
+  return value === null ? null : !value;
+};
 
 const formatBool = (signal, trueLabel = 'ON', falseLabel = 'OFF') => {
   const value = isBitSet(signal);
