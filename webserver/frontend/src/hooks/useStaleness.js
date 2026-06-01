@@ -1,16 +1,28 @@
 import { useEffect, useState } from 'react';
 
+let freshnessClockOffsetMs = 0;
+
+const getFreshnessNowMs = () => Date.now() - freshnessClockOffsetMs;
+
+export function syncFreshnessClock(timestampSeconds, observedAtMs = Date.now()) {
+  if (typeof timestampSeconds !== 'number' || !isFinite(timestampSeconds) || timestampSeconds <= 0) {
+    return;
+  }
+
+  freshnessClockOffsetMs = observedAtMs - timestampSeconds * 1000;
+}
+
 /**
  * Returns the current Date.now() value, updated every `intervalMs` milliseconds.
  * Used to drive periodic re-renders for staleness checks even when no new
  * messages have arrived.
  */
 export function useNowTick(intervalMs = 1000) {
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(() => getFreshnessNowMs());
 
   useEffect(() => {
     const id = setInterval(() => {
-      setNow(Date.now());
+      setNow(getFreshnessNowMs());
     }, intervalMs);
     return () => clearInterval(id);
   }, [intervalMs]);

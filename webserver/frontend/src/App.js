@@ -9,9 +9,11 @@ import HVCDashboard from './components/HVCDashboard';
 import MoboDashboard from './components/MoboDashboard';
 import InverterDashboard from './components/InverterDashboard';
 import VCUDashboard from './components/VCUDashboard';
+import DAQDashboard from './components/DAQDashboard';
 import DrivingDashboard from './components/DrivingDashboard';
 import { apiService } from './services/api';
 import { websocketService } from './services/websocket';
+import { syncFreshnessClock } from './hooks/useStaleness';
 
 const isPageVisible = () => typeof document === 'undefined' || document.visibilityState === 'visible';
 const BUS_IDS = ['bus1', 'bus2'];
@@ -221,15 +223,28 @@ function App() {
 
   // Stale message timeout (ms) — controls when sub-pages gray out data whose
   // source CAN message hasn't been seen recently. Persisted to localStorage.
+  const [staleMessagesEnabled, setStaleMessagesEnabledState] = useState(() => {
+    const stored = localStorage.getItem('staleMessagesEnabled');
+    if (stored === null) {
+      return true;
+    }
+    return stored === 'true';
+  });
   const [staleTimeoutMs, setStaleTimeoutMsState] = useState(() => {
     const stored = parseInt(localStorage.getItem('staleTimeoutMs'), 10);
     return Number.isFinite(stored) && stored > 0 ? stored : 30000;
   });
+  const setStaleMessagesEnabled = useCallback((enabled) => {
+    const nextValue = Boolean(enabled);
+    setStaleMessagesEnabledState(nextValue);
+    localStorage.setItem('staleMessagesEnabled', String(nextValue));
+  }, []);
   const setStaleTimeoutMs = useCallback((ms) => {
     const clamped = Math.max(1000, Math.min(600000, Math.round(ms)));
     setStaleTimeoutMsState(clamped);
     localStorage.setItem('staleTimeoutMs', String(clamped));
   }, []);
+  const effectiveStaleTimeoutMs = staleMessagesEnabled ? staleTimeoutMs : 0;
 
   // Performance: Batch incoming messages and aggregate by CAN ID
   const messageBufferRef = useRef([]);
@@ -456,7 +471,9 @@ function App() {
         return;
       }
 
-      lastHeartbeatRef.current = Date.now();
+      const observedAtMs = Date.now();
+      syncFreshnessClock(message.received_at, observedAtMs);
+      lastHeartbeatRef.current = observedAtMs;
 
       // Notify raw message callbacks (for components like ModuleConfig that need ALL messages)
       rawMessageCallbacksRef.current.forEach(callback => {
@@ -731,6 +748,8 @@ function App() {
             onStartSimulation={handleStartSimulation}
             onStopSimulation={handleStopSimulation}
             staleTimeoutMs={staleTimeoutMs}
+            staleMessagesEnabled={staleMessagesEnabled}
+            onStaleMessagesEnabledChange={setStaleMessagesEnabled}
             onStaleTimeoutChange={setStaleTimeoutMs}
           />
         )}
@@ -760,13 +779,15 @@ function App() {
             onStartSimulation={handleStartSimulation}
             onStopSimulation={handleStopSimulation}
             staleTimeoutMs={staleTimeoutMs}
+            staleMessagesEnabled={staleMessagesEnabled}
+            onStaleMessagesEnabledChange={setStaleMessagesEnabled}
             onStaleTimeoutChange={setStaleTimeoutMs}
           >
             <BMSStatus 
               messages={messages} 
               onSendMessage={handleSendMessage}
               dbcFile={dbcFile}
-              staleTimeoutMs={staleTimeoutMs}
+              staleTimeoutMs={effectiveStaleTimeoutMs}
             />
           </CANExplorer>
         )}
@@ -796,9 +817,11 @@ function App() {
             onStartSimulation={handleStartSimulation}
             onStopSimulation={handleStopSimulation}
             staleTimeoutMs={staleTimeoutMs}
+            staleMessagesEnabled={staleMessagesEnabled}
+            onStaleMessagesEnabledChange={setStaleMessagesEnabled}
             onStaleTimeoutChange={setStaleTimeoutMs}
           >
-            <BMSOverview messages={messages} staleTimeoutMs={staleTimeoutMs} />
+            <BMSOverview messages={messages} staleTimeoutMs={effectiveStaleTimeoutMs} />
           </CANExplorer>
         )}
         {activeTab === 'balance-manager' && (
@@ -827,12 +850,14 @@ function App() {
             onStartSimulation={handleStartSimulation}
             onStopSimulation={handleStopSimulation}
             staleTimeoutMs={staleTimeoutMs}
+            staleMessagesEnabled={staleMessagesEnabled}
+            onStaleMessagesEnabledChange={setStaleMessagesEnabled}
             onStaleTimeoutChange={setStaleTimeoutMs}
           >
             <BalanceManager
               messages={messages}
               onSendMessage={handleSendMessage}
-              staleTimeoutMs={staleTimeoutMs}
+              staleTimeoutMs={effectiveStaleTimeoutMs}
             />
           </CANExplorer>
         )}
@@ -862,6 +887,8 @@ function App() {
             onStartSimulation={handleStartSimulation}
             onStopSimulation={handleStopSimulation}
             staleTimeoutMs={staleTimeoutMs}
+            staleMessagesEnabled={staleMessagesEnabled}
+            onStaleMessagesEnabledChange={setStaleMessagesEnabled}
             onStaleTimeoutChange={setStaleTimeoutMs}
           >
             <ModuleConfig 
@@ -869,7 +896,7 @@ function App() {
               onSendMessage={handleSendMessage}
               connected={connected}
               onRegisterRawCallback={registerRawMessageCallback}
-              staleTimeoutMs={staleTimeoutMs}
+              staleTimeoutMs={effectiveStaleTimeoutMs}
             />
           </CANExplorer>
         )}
@@ -899,12 +926,14 @@ function App() {
             onStartSimulation={handleStartSimulation}
             onStopSimulation={handleStopSimulation}
             staleTimeoutMs={staleTimeoutMs}
+            staleMessagesEnabled={staleMessagesEnabled}
+            onStaleMessagesEnabledChange={setStaleMessagesEnabled}
             onStaleTimeoutChange={setStaleTimeoutMs}
           >
             <HVCDashboard
               messages={messages}
               onSendMessage={handleSendMessage}
-              staleTimeoutMs={staleTimeoutMs}
+              staleTimeoutMs={effectiveStaleTimeoutMs}
             />
           </CANExplorer>
         )}
@@ -934,13 +963,15 @@ function App() {
             onStartSimulation={handleStartSimulation}
             onStopSimulation={handleStopSimulation}
             staleTimeoutMs={staleTimeoutMs}
+            staleMessagesEnabled={staleMessagesEnabled}
+            onStaleMessagesEnabledChange={setStaleMessagesEnabled}
             onStaleTimeoutChange={setStaleTimeoutMs}
           >
             <VCUDashboard
               messages={messages}
               dbcFiles={dbcFiles}
               onSendMessage={handleSendMessage}
-              staleTimeoutMs={staleTimeoutMs}
+              staleTimeoutMs={effectiveStaleTimeoutMs}
             />
           </CANExplorer>
         )}
@@ -970,6 +1001,8 @@ function App() {
             onStartSimulation={handleStartSimulation}
             onStopSimulation={handleStopSimulation}
             staleTimeoutMs={staleTimeoutMs}
+            staleMessagesEnabled={staleMessagesEnabled}
+            onStaleMessagesEnabledChange={setStaleMessagesEnabled}
             onStaleTimeoutChange={setStaleTimeoutMs}
           >
             <MoboDashboard
@@ -977,7 +1010,7 @@ function App() {
               dbcFiles={dbcFiles}
               onSendMessage={handleSendMessage}
               onRegisterRawCallback={registerRawMessageCallback}
-              staleTimeoutMs={staleTimeoutMs}
+              staleTimeoutMs={effectiveStaleTimeoutMs}
             />
           </CANExplorer>
         )}
@@ -1007,13 +1040,15 @@ function App() {
             onStartSimulation={handleStartSimulation}
             onStopSimulation={handleStopSimulation}
             staleTimeoutMs={staleTimeoutMs}
+            staleMessagesEnabled={staleMessagesEnabled}
+            onStaleMessagesEnabledChange={setStaleMessagesEnabled}
             onStaleTimeoutChange={setStaleTimeoutMs}
           >
             <InverterDashboard
               messages={messages}
               dbcFiles={dbcFiles}
               onSendMessage={handleSendMessage}
-              staleTimeoutMs={staleTimeoutMs}
+              staleTimeoutMs={effectiveStaleTimeoutMs}
             />
           </CANExplorer>
         )}
@@ -1043,12 +1078,55 @@ function App() {
             onStartSimulation={handleStartSimulation}
             onStopSimulation={handleStopSimulation}
             staleTimeoutMs={staleTimeoutMs}
+            staleMessagesEnabled={staleMessagesEnabled}
+            onStaleMessagesEnabledChange={setStaleMessagesEnabled}
             onStaleTimeoutChange={setStaleTimeoutMs}
           >
             <DrivingDashboard
               messages={messages}
               dbcFiles={dbcFiles}
-              staleTimeoutMs={staleTimeoutMs}
+              staleTimeoutMs={effectiveStaleTimeoutMs}
+            />
+          </CANExplorer>
+        )}
+        {activeTab === 'daq-dashboard' && (
+          <CANExplorer
+            connected={connected}
+            messages={explorerMessages}
+            onClearMessages={handleClearMessages}
+            onSendMessage={handleSendMessage}
+            onLoadDBC={handleLoadDBC}
+            onUpdateDBCConfig={handleUpdateDBCConfig}
+            onDeleteDBC={handleDeleteDBC}
+            dbcLoaded={dbcLoaded}
+            dbcFile={dbcFile}
+            dbcFiles={dbcFiles}
+            dbcContext={dbcContext}
+            devices={devices}
+            onConnect={handleConnect}
+            onDisconnect={handleDisconnect}
+            onRefreshDevices={fetchDevices}
+            connectionStatus={connectionStatus}
+            stats={stats}
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            onRegisterRawCallback={registerRawMessageCallback}
+            simulationActive={simulationActive}
+            onStartSimulation={handleStartSimulation}
+            onStopSimulation={handleStopSimulation}
+            staleTimeoutMs={staleTimeoutMs}
+            staleMessagesEnabled={staleMessagesEnabled}
+            onStaleMessagesEnabledChange={setStaleMessagesEnabled}
+            onStaleTimeoutChange={setStaleTimeoutMs}
+          >
+            <DAQDashboard
+              messages={messages}
+              connected={connected}
+              connectionStatus={connectionStatus}
+              stats={stats}
+              dbcFiles={dbcFiles}
+              onSendMessage={handleSendMessage}
+              onUpdateDBCConfig={handleUpdateDBCConfig}
             />
           </CANExplorer>
         )}

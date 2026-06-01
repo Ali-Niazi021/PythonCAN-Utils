@@ -1,0 +1,481 @@
+.daq-dashboard {
+  min-height: 100%;
+  background: #0d0f10;
+  color: #e5e7eb;
+  padding: 18px;
+}
+
+.daq-header,
+.daq-toolbar,
+.daq-section-header,
+.daq-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.daq-header {
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.daq-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #7dd3fc;
+}
+
+.daq-title h2,
+.daq-section h3,
+.daq-detail-card h4,
+.daq-card-head h3,
+.daq-card-head h4 {
+  margin: 0;
+  color: #f3f4f6;
+}
+
+.daq-title h2 { font-size: 21px; }
+.daq-title span,
+.daq-section-header span,
+.daq-card-head span {
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.daq-header-metrics,
+.daq-toolbar-group,
+.daq-health-row,
+.daq-accel-actions,
+.daq-reset-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.daq-toolbar {
+  background: #111416;
+  border: 1px solid #252b2f;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.daq-toolbar label,
+.daq-config-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.daq-toolbar select,
+.daq-config-card select,
+.daq-config-card input {
+  background: #171b1f;
+  color: #e5e7eb;
+  border: 1px solid #2d353b;
+  border-radius: 6px;
+  padding: 6px 8px;
+  min-height: 31px;
+  outline: none;
+}
+
+.daq-toolbar select:focus,
+.daq-config-card select:focus,
+.daq-config-card input:focus {
+  border-color: #38bdf8;
+}
+
+.daq-chip,
+.daq-metric-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #2d353b;
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 12px;
+  color: #cbd5e1;
+  background: #15191d;
+  white-space: nowrap;
+}
+
+.daq-metric-pill strong {
+  color: #f8fafc;
+  font-variant-numeric: tabular-nums;
+}
+
+.daq-chip.ok { border-color: rgba(34, 197, 94, 0.45); color: #86efac; background: rgba(34, 197, 94, 0.12); }
+.daq-chip.warn { border-color: rgba(245, 158, 11, 0.45); color: #fde68a; background: rgba(245, 158, 11, 0.12); }
+.daq-chip.fault { border-color: rgba(239, 68, 68, 0.5); color: #fca5a5; background: rgba(239, 68, 68, 0.12); }
+.daq-chip.neutral { color: #cbd5e1; }
+
+.daq-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.daq-banner.warn {
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.1);
+  color: #fde68a;
+}
+
+.daq-banner.inline { margin: 10px 0 0; }
+
+.daq-banner button,
+.daq-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: #171b1f;
+  color: #e5e7eb;
+  border: 1px solid #2d353b;
+  border-radius: 7px;
+  padding: 7px 11px;
+  cursor: pointer;
+  font-size: 12px;
+  min-height: 32px;
+}
+
+.daq-button:hover:not(:disabled) { border-color: #4b5563; }
+.daq-button:disabled { opacity: 0.45; cursor: not-allowed; }
+.daq-button.active,
+.daq-button.primary { background: #075985; border-color: #38bdf8; color: #e0f2fe; }
+.daq-button.danger { background: rgba(127, 29, 29, 0.45); border-color: rgba(239, 68, 68, 0.45); color: #fecaca; }
+.daq-button.big { font-size: 14px; padding: 10px 16px; }
+
+.daq-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  border-bottom: 1px solid #252b2f;
+  margin-bottom: 14px;
+}
+
+.daq-tabs button {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #9ca3af;
+  padding: 9px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.daq-tabs button.active {
+  color: #7dd3fc;
+  border-color: #38bdf8;
+}
+
+.daq-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.daq-summary-grid,
+.daq-board-grid,
+.daq-detail-grid,
+.daq-result-grid,
+.daq-config-layout {
+  display: grid;
+  gap: 12px;
+}
+
+.daq-summary-grid { grid-template-columns: repeat(4, minmax(150px, 1fr)); }
+.daq-board-grid { grid-template-columns: repeat(3, minmax(250px, 1fr)); }
+.daq-detail-grid { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.daq-result-grid { grid-template-columns: repeat(3, minmax(160px, 1fr)); }
+.daq-config-layout { grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); }
+
+.daq-summary-card,
+.daq-board-card,
+.daq-detail-card,
+.daq-config-card,
+.daq-accel-card,
+.daq-distance-card,
+.daq-timer-result,
+.daq-command-history {
+  background: #111416;
+  border: 1px solid #252b2f;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.daq-summary-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 3px;
+}
+
+.daq-summary-card span { color: #9ca3af; font-size: 12px; }
+.daq-summary-card strong { grid-column: 2; font-size: 22px; color: #f8fafc; }
+.daq-summary-card.ok svg { color: #22c55e; }
+.daq-summary-card.warn svg { color: #f59e0b; }
+.daq-summary-card.fault svg { color: #ef4444; }
+
+.daq-board-card.online { border-color: rgba(34, 197, 94, 0.35); }
+.daq-board-card.stale { border-color: rgba(245, 158, 11, 0.45); }
+.daq-board-card.offline { opacity: 0.72; border-color: rgba(239, 68, 68, 0.38); }
+
+.daq-card-head { margin-bottom: 10px; }
+.daq-card-head h3 { font-size: 16px; }
+.daq-card-head h4 { font-size: 14px; }
+
+.daq-board-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #9ca3af;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
+.daq-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.daq-signal-mini {
+  background: #171b1f;
+  border: 1px solid #252b2f;
+  border-radius: 7px;
+  padding: 8px;
+  min-width: 0;
+}
+
+.daq-signal-mini span,
+.daq-signal-row span {
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.daq-signal-mini strong,
+.daq-signal-row strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.daq-signal-mini small,
+.daq-signal-row small {
+  color: #6b7280;
+  font-size: 11px;
+}
+
+.daq-detail-card.stale { border-color: rgba(245, 158, 11, 0.45); }
+.daq-detail-card.missing { opacity: 0.72; }
+
+.daq-signal-table {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.daq-signal-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: baseline;
+  border-bottom: 1px solid #1f2529;
+  padding-bottom: 6px;
+}
+
+.daq-signal-row strong { font-size: 14px; text-align: right; }
+
+.daq-bar {
+  position: relative;
+  height: 8px;
+  background: #1f2529;
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 12px;
+}
+
+.daq-bar > span:not(.daq-bar-center) {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #38bdf8, #86efac);
+}
+
+.daq-bar-center {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #9ca3af;
+  z-index: 1;
+}
+
+.daq-accel-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 1.3fr) minmax(320px, 1fr);
+  align-items: start;
+}
+
+.daq-accel-card,
+.daq-distance-card,
+.daq-result-grid,
+.daq-command-history { grid-column: 1 / -1; }
+
+.daq-distance-grid {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr;
+  gap: 10px;
+}
+
+.daq-distance-progress {
+  background: #171b1f;
+  border: 1px solid #252b2f;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.daq-distance-progress.primary {
+  border-color: rgba(56, 189, 248, 0.45);
+  background: #12191c;
+}
+
+.daq-distance-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.daq-distance-label span,
+.daq-distance-progress small,
+.daq-no-distance {
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.daq-distance-label strong {
+  color: #f8fafc;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.daq-distance-bar {
+  height: 9px;
+  background: #1f2529;
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: 5px;
+}
+
+.daq-distance-bar span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #38bdf8, #86efac);
+}
+
+.daq-timer-result {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.daq-timer-result.complete { border-color: rgba(34, 197, 94, 0.45); }
+.daq-timer-result.highlight { background: #12191c; }
+.daq-timer-result span { color: #9ca3af; }
+.daq-timer-result strong { color: #f8fafc; font-size: 24px; font-variant-numeric: tabular-nums; }
+.daq-timer-result small { color: #86efac; }
+
+.daq-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.daq-command-preview {
+  background: #171b1f;
+  border: 1px solid #252b2f;
+  border-radius: 7px;
+  padding: 9px;
+  color: #cbd5e1;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 12px;
+  margin: 10px 0;
+}
+
+.daq-config-card.protected { border-color: rgba(239, 68, 68, 0.38); }
+
+.daq-table-wrap {
+  overflow: auto;
+  max-height: 430px;
+  border: 1px solid #1f2529;
+  border-radius: 7px;
+}
+
+.daq-table-wrap.compact { max-height: 260px; }
+
+.daq-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.daq-table th,
+.daq-table td {
+  text-align: left;
+  padding: 7px 8px;
+  border-bottom: 1px solid #1f2529;
+  white-space: nowrap;
+}
+
+.daq-table th {
+  position: sticky;
+  top: 0;
+  background: #15191d;
+  color: #9ca3af;
+  z-index: 1;
+}
+
+.daq-table td { color: #d1d5db; }
+.daq-table .mono { font-family: 'SFMono-Regular', Consolas, monospace; }
+.daq-empty-row { text-align: center !important; color: #6b7280 !important; padding: 18px !important; }
+
+@media (max-width: 1100px) {
+  .daq-summary-grid,
+  .daq-board-grid,
+  .daq-result-grid,
+  .daq-distance-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .daq-dashboard { padding: 12px; }
+  .daq-summary-grid,
+  .daq-board-grid,
+  .daq-detail-grid,
+  .daq-result-grid,
+  .daq-distance-grid,
+  .daq-config-layout,
+  .daq-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .daq-signal-row { grid-template-columns: 1fr; }
+  .daq-signal-row strong { text-align: left; }
+}

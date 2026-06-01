@@ -759,6 +759,22 @@
   font-weight: 500;
 }
 
+.settings-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.settings-checkbox input {
+  margin: 0;
+  accent-color: #dc2626;
+}
+
+.settings-checkbox span {
+  flex: 1;
+}
+
 .settings-input {
   width: 100%;
   padding: 8px 12px;
@@ -773,6 +789,11 @@
   outline: none;
   border-color: #dc2626;
   background: #252525;
+}
+
+.settings-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .settings-hint {

@@ -76,6 +76,8 @@ function CANExplorer({
   onStartSimulation,
   onStopSimulation,
   staleTimeoutMs,
+  staleMessagesEnabled = true,
+  onStaleMessagesEnabledChange,
   onStaleTimeoutChange,
   children
 }) {
@@ -1244,6 +1246,15 @@ function CANExplorer({
               </button>
             </div>
             <div className="sidebar-menu-group">
+              <div className="sidebar-menu-header">DAQ</div>
+              <button
+                className={`sidebar-tab submenu ${activeTab === 'daq-dashboard' ? 'active' : ''}`}
+                onClick={() => onTabChange('daq-dashboard')}
+              >
+                DAQ Dashboard
+              </button>
+            </div>
+            <div className="sidebar-menu-group">
               <div className="sidebar-menu-header">Driving</div>
               <button
                 className={`sidebar-tab submenu ${activeTab === 'driving-dashboard' ? 'active' : ''}`}
@@ -1474,6 +1485,20 @@ function CANExplorer({
           {settingsExpanded && (
             <div className="settings-form">
               <div className="form-group">
+                <label className="settings-checkbox" htmlFor="stale-messages-enabled">
+                  <input
+                    id="stale-messages-enabled"
+                    type="checkbox"
+                    checked={staleMessagesEnabled}
+                    onChange={(e) => onStaleMessagesEnabledChange?.(e.target.checked)}
+                  />
+                  <span>Enable stale message detection</span>
+                </label>
+                <div className="settings-hint">
+                  Turn this off to stop graying out cards and freshness badges everywhere.
+                </div>
+              </div>
+              <div className="form-group">
                 <label htmlFor="stale-timeout-input">Stale Message Timeout (s)</label>
                 <input
                   id="stale-timeout-input"
@@ -1484,6 +1509,7 @@ function CANExplorer({
                   value={staleTimeoutInput}
                   onChange={(e) => setStaleTimeoutInput(e.target.value)}
                   onBlur={(e) => commitStaleTimeout(e.target.value)}
+                  disabled={!staleMessagesEnabled}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.target.blur();
@@ -1492,7 +1518,9 @@ function CANExplorer({
                   className="settings-input"
                 />
                 <div className="settings-hint">
-                  Data older than this is shown grayed-out on sub-pages. Default 30s.
+                  {staleMessagesEnabled
+                    ? 'Data older than this is shown grayed-out on sub-pages. Default 30s.'
+                    : 'Stale detection is off. Re-enable it to use this timeout again.'}
                 </div>
               </div>
             </div>

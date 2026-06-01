@@ -17,11 +17,15 @@
       "enabled": true
     },
     {
+      "filename": "VCU.dbc",
+      "enabled": true
+    },
+    {
       "filename": "can9-database-01.09.dbc",
       "enabled": true
     },
     {
-      "filename": "VCU.dbc",
+      "filename": "DAQ-Firmware.dbc",
       "enabled": true
     },
     {
