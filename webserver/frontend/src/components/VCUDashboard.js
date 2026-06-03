@@ -18,10 +18,33 @@ const VCU_FRAME_SIGNALS = {
   VCU_BSE: ['VCU_BSE_PSI', 'VCU_BSE_Valid', 'VCU_BSE_Stale', 'VCU_BSE_ADC_Err', 'VCU_BSE_Out_of_Range'],
   VCU_Dead_Car: ['VCU_Dead_HVC_Msg_Valid', 'VCU_Dead_IMD_OK', 'VCU_Dead_BMS_OK', 'VCU_Dead_SDC_OK'],
   VCU_CAN_Health: ['VCU_Controls_Passive_Err', 'VCU_Controls_Bus_Off', 'VCU_DAQ_Passive_Err', 'VCU_DAQ_Bus_Off', 'VCU_Controls_Status', 'VCU_DAQ_Status'],
+  VCU_Regen_Debug: [
+    'VCU_Regen_Debug_Mux',
+    'VCU_Regen_Strategy_Status',
+    'VCU_Regen_SOC_Gate_Status',
+    'VCU_Regen_Enabled_Status',
+    'VCU_Regen_Driving_Status',
+    'VCU_Regen_Speed_OK',
+    'VCU_Regen_Front_Valid',
+    'VCU_Regen_Rear_Valid',
+    'VCU_Regen_Ryder_Active',
+    'VCU_Regen_Active',
+    'VCU_Regen_SOC_Valid',
+    'VCU_Regen_Block_Reason',
+    'VCU_Regen_Torque_Request',
+    'VCU_Regen_Speed_RPM_Abs',
+    'VCU_Regen_Front_PSI',
+    'VCU_Regen_Rear_PSI',
+    'VCU_Regen_INV_Torque_Cmd',
+    'VCU_Regen_Ryder_Table_Torque',
+    'VCU_Regen_Ryder_Balance_Torque',
+    'VCU_Regen_Final_Positive_Torque',
+  ],
   VCU_Config: [
     'VCU_Max_Torque',
     'VCU_Motor_Direction',
     'VCU_Regen_Enabled',
+    'VCU_Regen_SOC_Gate_Enabled',
     'VCU_ECHO_DAQ',
     'VCU_Ignore_RTD_Switch',
     'VCU_Ignore_RTD_Brakes',
@@ -115,6 +138,25 @@ const LAUNCH_CURVE_LABELS = {
   2: 'CURVE_C',
   3: 'UPLOADED',
 };
+const REGEN_DEBUG_MUX_LABELS = {
+  0: 'STATUS',
+  1: 'PRESSURES',
+  2: 'RYDER_MATH',
+};
+const REGEN_BLOCK_REASON_LABELS = {
+  0: 'NONE',
+  1: 'DISABLED',
+  2: 'NOT_DRIVING',
+  3: 'BELOW_MIN_SPEED',
+  4: 'FRONT_INVALID',
+  5: 'REAR_INVALID',
+  6: 'FRONT_PRESSURE_HIGH',
+  7: 'RYDER_TABLE_ZERO',
+  8: 'RYDER_BALANCE_ZERO',
+  9: 'LEGACY_PRESSURE_INVALID',
+  10: 'ZERO_AFTER_CLAMPS',
+  11: 'SOC_HIGH',
+};
 
 const CONFIG_OPTION_GROUPS = [
   {
@@ -151,6 +193,7 @@ const CONFIG_OPTION_GROUPS = [
       { value: 19, label: 'REGEN_MIN_SPEED' },
       { value: 20, label: 'REGEN_MAX_SOC' },
       { value: 21, label: 'REGEN_STRATEGY' },
+      { value: 39, label: 'REGEN_SOC_GATE_ENABLED' },
     ],
   },
   {
@@ -222,6 +265,7 @@ const CONFIG_READBACK_GROUPS = [
     title: 'REGEN',
     fields: [
       ['VCU_Regen_Enabled', 'Regen enabled', BOOLEAN_LABELS],
+      ['VCU_Regen_SOC_Gate_Enabled', 'Regen SoC cap enabled', BOOLEAN_LABELS],
       ['VCU_Regen_Max_Torque', 'Regen max torque'],
       ['VCU_Regen_Min_Torque', 'Regen min torque'],
       ['VCU_Regen_Min_BSE_Rear_PSI', 'Regen min rear BSE'],
@@ -263,6 +307,44 @@ const CONFIG_READBACK_GROUPS = [
   {
     title: 'DEBUG DEFINES',
     debugFields: DEBUG_FIELDS,
+  },
+];
+
+const REGEN_DEBUG_GROUPS = [
+  {
+    title: 'Status',
+    fields: [
+      ['VCU_Regen_Debug_Mux', 'Latest variant', REGEN_DEBUG_MUX_LABELS],
+      ['VCU_Regen_Strategy_Status', 'Strategy', REGEN_STRATEGY_LABELS],
+      ['VCU_Regen_SOC_Gate_Status', 'SoC cap active', BOOLEAN_LABELS],
+      ['VCU_Regen_Enabled_Status', 'Regen enabled', BOOLEAN_LABELS],
+      ['VCU_Regen_Driving_Status', 'Driving', BOOLEAN_LABELS],
+      ['VCU_Regen_Speed_OK', 'Speed OK', BOOLEAN_LABELS],
+      ['VCU_Regen_Front_Valid', 'Front valid', BOOLEAN_LABELS],
+      ['VCU_Regen_Rear_Valid', 'Rear valid', BOOLEAN_LABELS],
+      ['VCU_Regen_Ryder_Active', 'Ryder active', BOOLEAN_LABELS],
+      ['VCU_Regen_Active', 'Regen active', BOOLEAN_LABELS],
+      ['VCU_Regen_SOC_Valid', 'SoC valid', BOOLEAN_LABELS],
+      ['VCU_Regen_Block_Reason', 'Block reason', REGEN_BLOCK_REASON_LABELS],
+      ['VCU_Regen_Torque_Request', 'Torque request'],
+      ['VCU_Regen_Speed_RPM_Abs', 'Absolute speed'],
+    ],
+  },
+  {
+    title: 'Pressure Path',
+    fields: [
+      ['VCU_Regen_Front_PSI', 'Front pressure'],
+      ['VCU_Regen_Rear_PSI', 'Rear pressure'],
+      ['VCU_Regen_INV_Torque_Cmd', 'Inverter torque cmd'],
+    ],
+  },
+  {
+    title: 'Ryder Math',
+    fields: [
+      ['VCU_Regen_Ryder_Table_Torque', 'Table torque'],
+      ['VCU_Regen_Ryder_Balance_Torque', 'Balance torque'],
+      ['VCU_Regen_Final_Positive_Torque', 'Final positive torque'],
+    ],
   },
 ];
 
@@ -773,6 +855,12 @@ function VCUDashboard({ messages, dbcFiles = [], onSendMessage, staleTimeoutMs =
                 </select>
               </label>
             )}
+            {mux === 39 && (
+              <label className="vcu-checkbox">
+                <input type="checkbox" checked={config.regenSocGateEnabled} onChange={(event) => setConfig((prev) => ({ ...prev, regenSocGateEnabled: event.target.checked }))} />
+                Regen SoC cap enabled
+              </label>
+            )}
             {mux === 22 && (
               <label className="vcu-checkbox">
                 <input type="checkbox" checked={config.launchEnabled} onChange={(event) => setConfig((prev) => ({ ...prev, launchEnabled: event.target.checked }))} />
@@ -854,6 +942,22 @@ function VCUDashboard({ messages, dbcFiles = [], onSendMessage, staleTimeoutMs =
               {sendBusy ? 'Sending...' : 'Send Config'}
             </button>
           </div>
+        </div>
+      </section>
+
+      <section className="vcu-card">
+        <div className="vcu-card-header"><Activity size={18} /><h3>Regen Debug</h3><Freshness timestamp={frames.VCU_Regen_Debug?.timestamp} nowMs={nowMs} staleTimeoutMs={staleTimeoutMs} /></div>
+        <div className="vcu-health-grid">
+          {REGEN_DEBUG_GROUPS.map((group) => (
+            <section key={group.title} className="vcu-config-group">
+              <div className="vcu-config-group-header">{group.title}</div>
+              <div className="vcu-readback-grid">
+                {group.fields.map(([signalName, label, labels]) => (
+                  <span key={signalName} className="vcu-config-item">{label} <strong>{labels ? enumLabel(getSignal(signalName), labels) : getDisplay(getSignal(signalName))}</strong></span>
+                ))}
+              </div>
+            </section>
+          ))}
         </div>
       </section>
     </div>

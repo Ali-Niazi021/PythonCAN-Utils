@@ -27,6 +27,7 @@ export const createDefaultVcuConfig = () => ({
   maxTorqueNm: 0,
   motorDirection: 1,
   regenEnabled: false,
+  regenSocGateEnabled: false,
   echoDaq: false,
   ignoreRtdSwitch: false,
   ignoreRtdBrakes: false,
@@ -79,6 +80,7 @@ export const getVcuConfigFromSignals = (getSignal) => ({
   maxTorqueNm: getNumeric(getSignal('VCU_Max_Torque')) ?? 0,
   motorDirection: getNumeric(getSignal('VCU_Motor_Direction')) ?? 1,
   regenEnabled: bitValue(getSignal('VCU_Regen_Enabled')) ?? false,
+  regenSocGateEnabled: bitValue(getSignal('VCU_Regen_SOC_Gate_Enabled')) ?? false,
   echoDaq: bitValue(getSignal('VCU_ECHO_DAQ')) ?? false,
   ignoreRtdSwitch: bitValue(getSignal('VCU_Ignore_RTD_Switch')) ?? false,
   ignoreRtdBrakes: bitValue(getSignal('VCU_Ignore_RTD_Brakes')) ?? false,
@@ -185,6 +187,7 @@ export const buildVcuConfigFrame = (mux, config) => {
   if (mux === 36) view.setUint16(1, Math.round(clampNumber(config.launchActualTorque2, 0, 230, 65)), true);
   if (mux === 37) view.setUint16(1, Math.round(clampNumber(config.launchActualTorque3, 0, 230, 80)), true);
   if (mux === 38) view.setUint16(1, Math.round(clampNumber(config.launchActualTorque4, 0, 230, 90)), true);
+  if (mux === 39) bytes[1] = config.regenSocGateEnabled ? 1 : 0;
   if (mux === 240) view.setUint16(1, Math.round(clampNumber(config.trcCommand, 0, 9, 0)), true);
 
   return Array.from(bytes);

@@ -5,6 +5,10 @@ import './CANExplorer.css';
 
 const BUS_IDS = ['bus1', 'bus2'];
 
+const getPreferredSocketCanInterface = (busId) => (busId === 'bus2' ? 'can1' : 'can0');
+
+const formatCanableChannelOption = (device) => `Device ${device.index}: ${device.description}`;
+
 const readStoredValue = (key, fallback) => {
   if (typeof window === 'undefined') {
     return fallback;
@@ -14,7 +18,7 @@ const readStoredValue = (key, fallback) => {
 
 const createInitialConnectionDraft = (busId) => ({
   deviceType: 'canable',
-  channel: 'Device 0',
+  channel: busId === 'bus2' ? 'Device 1' : 'Device 0',
   baudrate: 'BAUD_500K',
   networkHost: readStoredValue(`${busId}:networkDeviceHost`, '192.168.1.100'),
   networkPort: readStoredValue(`${busId}:networkDevicePort`, '8080'),
@@ -282,17 +286,20 @@ function CANExplorer({
     }));
   }, []);
 
-  const getDefaultDraftValues = useCallback((nextDeviceType) => {
+  const getDefaultDraftValues = useCallback((nextDeviceType, busId) => {
     if (nextDeviceType === 'pcan') {
       return { channel: pcanDevices[0]?.name || 'USB1' };
     }
 
     if (nextDeviceType === 'canable') {
-      const firstCanable = canableDevices[0];
+      const preferredInterface = getPreferredSocketCanInterface(busId);
+      const firstCanable = canableDevices.find((device) => (
+        device.interface === 'socketcan' && device.channel === preferredInterface
+      )) || canableDevices[0];
       return {
         channel: firstCanable
-          ? `Device ${firstCanable.index}: ${firstCanable.description}`
-          : 'Device 0',
+          ? formatCanableChannelOption(firstCanable)
+          : (busId === 'bus2' ? 'Device 1' : 'Device 0'),
       };
     }
 
@@ -305,10 +312,44 @@ function CANExplorer({
     return {};
   }, [bluetoothDevices, canableDevices, pcanDevices]);
 
+  useEffect(() => {
+    if (canableDevices.length === 0) {
+      return;
+    }
+
+    const availableChannels = new Set(canableDevices.map((device) => formatCanableChannelOption(device)));
+
+    setConnectionDrafts((previousDrafts) => {
+      let changed = false;
+      const nextDrafts = { ...previousDrafts };
+
+      BUS_IDS.forEach((busId) => {
+        const draft = previousDrafts[busId];
+        if (draft.deviceType !== 'canable') {
+          return;
+        }
+
+        const preferredChannel = getDefaultDraftValues('canable', busId).channel;
+        const usesPlaceholder = /^Device \d+$/.test(String(draft.channel));
+        const missingFromDeviceList = !availableChannels.has(draft.channel);
+
+        if ((usesPlaceholder || missingFromDeviceList) && draft.channel !== preferredChannel) {
+          nextDrafts[busId] = {
+            ...draft,
+            channel: preferredChannel,
+          };
+          changed = true;
+        }
+      });
+
+      return changed ? nextDrafts : previousDrafts;
+    });
+  }, [canableDevices, getDefaultDraftValues]);
+
   const handleBusDeviceTypeChange = useCallback((busId, nextDeviceType) => {
     updateConnectionDraft(busId, {
       deviceType: nextDeviceType,
-      ...getDefaultDraftValues(nextDeviceType),
+      ...getDefaultDraftValues(nextDeviceType, busId),
     });
   }, [getDefaultDraftValues, updateConnectionDraft]);
 
@@ -1081,7 +1122,7 @@ function CANExplorer({
                 ) : (
                   canableDevices.length > 0 ? (
                     canableDevices.map((device) => {
-                      const fullName = `Device ${device.index}: ${device.description}`;
+                      const fullName = formatCanableChannelOption(device);
                       return (
                         <option key={`${busId}-${device.index}`} value={fullName}>
                           {fullName}

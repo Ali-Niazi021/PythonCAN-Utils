@@ -18,6 +18,10 @@ import { syncFreshnessClock } from './hooks/useStaleness';
 
 const isPageVisible = () => typeof document === 'undefined' || document.visibilityState === 'visible';
 const BUS_IDS = ['bus1', 'bus2'];
+const AUTO_CONNECT_SOCKETCAN_CHANNELS = {
+  bus1: 'can0',
+  bus2: 'can1',
+};
 
 const formatStatusLabel = (status) => {
   if (!status || typeof status !== 'string') {
@@ -257,6 +261,7 @@ function App() {
   const lastHeartbeatRef = useRef(Date.now());
   const canStateRef = useRef('unknown'); // tracks backend CAN state for toast gating
   const connectWebSocketRef = useRef(null);
+  const autoConnectAttemptedBusIdsRef = useRef(new Set());
   
   // Raw message callbacks for components that need to see ALL messages (not aggregated)
   const rawMessageCallbacksRef = useRef([]);
@@ -504,7 +509,7 @@ function App() {
     checkDBCStatus();
   }, [fetchDevices, checkConnectionStatus, checkSimulationStatus, checkDBCStatus]);
 
-  const handleConnect = async (busId, deviceType, channel, baudrate) => {
+  const handleConnect = useCallback(async (busId, deviceType, channel, baudrate) => {
     if (simulationActive) {
       alert('Stop Test Mode before connecting to real hardware.');
       return false;
@@ -532,7 +537,57 @@ function App() {
       alert('Failed to connect: ' + (error.response?.data?.detail || error.message));
       return false;
     }
-  };
+  }, [checkConnectionStatus, connectWebSocket, simulationActive]);
+
+  useEffect(() => {
+    if (simulationActive || devices.length === 0) {
+      return;
+    }
+
+    const connectedBusIds = new Set(
+      (connectionStatus.buses || [])
+        .filter((bus) => bus?.connected)
+        .map((bus) => bus.bus_id)
+    );
+
+    const pendingTargets = Object.entries(AUTO_CONNECT_SOCKETCAN_CHANNELS)
+      .filter(([busId]) => !connectedBusIds.has(busId) && !autoConnectAttemptedBusIdsRef.current.has(busId))
+      .map(([busId, interfaceName]) => {
+        const matchingDevice = devices.find((device) => (
+          device?.device_type === 'canable'
+          && device?.interface === 'socketcan'
+          && device?.channel === interfaceName
+        ));
+        return matchingDevice ? { busId, deviceIndex: String(matchingDevice.index) } : null;
+      })
+      .filter(Boolean);
+
+    if (pendingTargets.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const attemptAutoConnect = async () => {
+      for (const target of pendingTargets) {
+        if (cancelled) {
+          return;
+        }
+
+        autoConnectAttemptedBusIdsRef.current.add(target.busId);
+        const success = await handleConnect(target.busId, 'canable', target.deviceIndex, 'BAUD_500K');
+        if (!success && !cancelled) {
+          autoConnectAttemptedBusIdsRef.current.delete(target.busId);
+        }
+      }
+    };
+
+    attemptAutoConnect();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [connectionStatus.buses, devices, handleConnect, simulationActive]);
 
   const handleStartSimulation = async () => {
     try {
