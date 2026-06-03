@@ -3,9 +3,13 @@ import {
   Activity, AlertTriangle, Gauge, HeartPulse, Settings, ShieldAlert, SlidersHorizontal, Zap,
 } from 'lucide-react';
 import { useNowTick, isTimestampStale } from '../hooks/useStaleness';
+import {
+  SET_VCU_CONFIG_ID,
+  buildVcuConfigFrame,
+  createDefaultVcuConfig,
+  getVcuConfigFromSignals,
+} from './vcuConfig';
 import './VCUDashboard.css';
-
-const SET_VCU_CONFIG_ID = 0x800000CF;
 
 const VCU_FRAME_SIGNALS = {
   VCU_Summary: ['VCU_State', 'VCU_Speed', 'VCU_Buzzer_State', 'VCU_RTD_Active', 'VCU_Red_Car'],
@@ -37,6 +41,32 @@ const VCU_FRAME_SIGNALS = {
     'VCU_TC_Min_Front_RPM',
     'VCU_Power_Limit_Enabled',
     'VCU_Power_Cap_kW',
+    'VCU_Regen_Max_Torque',
+    'VCU_Regen_Min_Torque',
+    'VCU_Regen_Min_BSE_Rear_PSI',
+    'VCU_Regen_Min_BSE_Front_PSI',
+    'VCU_Regen_Max_BSE_Rear_PSI',
+    'VCU_Regen_Max_BSE_Front_PSI',
+    'VCU_Regen_Min_Speed',
+    'VCU_Regen_Max_SOC',
+    'VCU_Regen_Strategy',
+    'VCU_Launch_Enabled',
+    'VCU_Launch_End_RPM',
+    'VCU_Launch_Timeout_ms',
+    'VCU_Launch_Max_Slip',
+    'VCU_Launch_Best_Curve',
+    'VCU_Launch_Active_Curve',
+    'VCU_Launch_Recommended_Slip',
+    'VCU_Launch_Actual_RPM_0',
+    'VCU_Launch_Actual_RPM_1',
+    'VCU_Launch_Actual_RPM_2',
+    'VCU_Launch_Actual_RPM_3',
+    'VCU_Launch_Actual_RPM_4',
+    'VCU_Launch_Actual_Torque_0',
+    'VCU_Launch_Actual_Torque_1',
+    'VCU_Launch_Actual_Torque_2',
+    'VCU_Launch_Actual_Torque_3',
+    'VCU_Launch_Actual_Torque_4',
   ],
 };
 
@@ -73,21 +103,84 @@ const STATUS_LABELS = {
 
 const BOOLEAN_LABELS = { 0: 'FALSE', 1: 'TRUE' };
 const DIRECTION_LABELS = { 0: 'REVERSE', 1: 'FORWARD' };
+const REGEN_STRATEGY_LABELS = {
+  0: 'FRONT_ONLY',
+  1: 'REAR_ONLY',
+  2: 'AVERAGED',
+  3: 'RYDER',
+};
+const LAUNCH_CURVE_LABELS = {
+  0: 'CURVE_A',
+  1: 'CURVE_B',
+  2: 'CURVE_C',
+  3: 'UPLOADED',
+};
 
-const CONFIG_GROUP_OPTIONS = [
-  { value: 0, label: 'MAX_TORQUE' },
-  { value: 1, label: 'MOTOR_DIRECTION' },
-  { value: 2, label: 'REGEN_ENABLED' },
-  { value: 3, label: 'DEBUG_DEFINES' },
-  { value: 4, label: 'WHEEL_DIAMETER' },
-  { value: 5, label: 'TRACTION_CONTROL_ENABLED' },
-  { value: 6, label: 'TRACTION_CONTROL_TARGET_SLIP' },
-  { value: 7, label: 'TRACTION_CONTROL_KP' },
-  { value: 8, label: 'TRACTION_CONTROL_KI' },
-  { value: 9, label: 'TRACTION_CONTROL_KD' },
-  { value: 10, label: 'TRACTION_CONTROL_MIN_FRONT_RPM' },
-  { value: 11, label: 'POWER_LIMIT_ENABLED' },
-  { value: 12, label: 'POWER_CAP_KW' },
+const CONFIG_OPTION_GROUPS = [
+  {
+    label: 'GENERAL',
+    options: [
+      { value: 0, label: 'MAX_TORQUE' },
+      { value: 1, label: 'MOTOR_DIRECTION' },
+      { value: 4, label: 'WHEEL_DIAMETER' },
+      { value: 11, label: 'POWER_LIMIT_ENABLED' },
+      { value: 12, label: 'POWER_CAP_KW' },
+    ],
+  },
+  {
+    label: 'TRACTION CONTROL',
+    options: [
+      { value: 5, label: 'TRACTION_CONTROL_ENABLED' },
+      { value: 6, label: 'TRACTION_CONTROL_TARGET_SLIP' },
+      { value: 7, label: 'TRACTION_CONTROL_KP' },
+      { value: 8, label: 'TRACTION_CONTROL_KI' },
+      { value: 9, label: 'TRACTION_CONTROL_KD' },
+      { value: 10, label: 'TRACTION_CONTROL_MIN_FRONT_RPM' },
+    ],
+  },
+  {
+    label: 'REGEN',
+    options: [
+      { value: 2, label: 'REGEN_ENABLED' },
+      { value: 13, label: 'REGEN_MAX_TORQUE' },
+      { value: 14, label: 'REGEN_MIN_TORQUE' },
+      { value: 15, label: 'REGEN_MIN_BSE_REAR_PSI' },
+      { value: 16, label: 'REGEN_MIN_BSE_FRONT_PSI' },
+      { value: 17, label: 'REGEN_MAX_BSE_REAR_PSI' },
+      { value: 18, label: 'REGEN_MAX_BSE_FRONT_PSI' },
+      { value: 19, label: 'REGEN_MIN_SPEED' },
+      { value: 20, label: 'REGEN_MAX_SOC' },
+      { value: 21, label: 'REGEN_STRATEGY' },
+    ],
+  },
+  {
+    label: 'LAUNCH CONTROL',
+    options: [
+      { value: 22, label: 'LAUNCH_ENABLED' },
+      { value: 23, label: 'LAUNCH_END_RPM' },
+      { value: 24, label: 'LAUNCH_TIMEOUT_MS' },
+      { value: 25, label: 'LAUNCH_MAX_SLIP' },
+      { value: 26, label: 'LAUNCH_BEST_CURVE' },
+      { value: 27, label: 'LAUNCH_ACTIVE_CURVE' },
+      { value: 28, label: 'LAUNCH_RECOMMENDED_SLIP' },
+      { value: 29, label: 'LAUNCH_ACTUAL_RPM_0' },
+      { value: 30, label: 'LAUNCH_ACTUAL_RPM_1' },
+      { value: 31, label: 'LAUNCH_ACTUAL_RPM_2' },
+      { value: 32, label: 'LAUNCH_ACTUAL_RPM_3' },
+      { value: 33, label: 'LAUNCH_ACTUAL_RPM_4' },
+      { value: 34, label: 'LAUNCH_ACTUAL_TORQUE_0' },
+      { value: 35, label: 'LAUNCH_ACTUAL_TORQUE_1' },
+      { value: 36, label: 'LAUNCH_ACTUAL_TORQUE_2' },
+      { value: 37, label: 'LAUNCH_ACTUAL_TORQUE_3' },
+      { value: 38, label: 'LAUNCH_ACTUAL_TORQUE_4' },
+    ],
+  },
+  {
+    label: 'DEBUG DEFINES',
+    options: [
+      { value: 3, label: 'DEBUG_DEFINES' },
+    ],
+  },
 ];
 
 const DEBUG_FIELDS = [
@@ -103,20 +196,79 @@ const DEBUG_FIELDS = [
   ['alwaysGreen', 'VCU_Always_Green', 'SET_VCU_Always_Green', 'Always green'],
 ];
 
-const CONFIG_READBACK_FIELDS = [
-  ['VCU_Max_Torque', 'Max torque'],
-  ['VCU_Motor_Direction', 'Motor direction', DIRECTION_LABELS],
-  ['VCU_Regen_Enabled', 'Regen enabled', BOOLEAN_LABELS],
-  ['VCU_Wheel_Diameter', 'Wheel diameter'],
-  ['VCU_TC_Enabled', 'Traction control enabled', BOOLEAN_LABELS],
-  ['VCU_TC_Target_Slip', 'Target slip'],
-  ['VCU_TC_Kp', 'Traction control Kp'],
-  ['VCU_TC_Ki', 'Traction control Ki'],
-  ['VCU_TC_Kd', 'Traction control Kd'],
-  ['VCU_TC_Min_Front_RPM', 'Min front RPM'],
-  ['VCU_Power_Limit_Enabled', 'Power limit enabled', BOOLEAN_LABELS],
-  ['VCU_Power_Cap_kW', 'Power cap'],
+const CONFIG_READBACK_GROUPS = [
+  {
+    title: 'General',
+    fields: [
+      ['VCU_Max_Torque', 'Max torque'],
+      ['VCU_Motor_Direction', 'Motor direction', DIRECTION_LABELS],
+      ['VCU_Wheel_Diameter', 'Wheel diameter'],
+      ['VCU_Power_Limit_Enabled', 'Power limit enabled', BOOLEAN_LABELS],
+      ['VCU_Power_Cap_kW', 'Power cap'],
+    ],
+  },
+  {
+    title: 'Traction Control',
+    fields: [
+      ['VCU_TC_Enabled', 'Traction control enabled', BOOLEAN_LABELS],
+      ['VCU_TC_Target_Slip', 'Target slip'],
+      ['VCU_TC_Kp', 'Traction control Kp'],
+      ['VCU_TC_Ki', 'Traction control Ki'],
+      ['VCU_TC_Kd', 'Traction control Kd'],
+      ['VCU_TC_Min_Front_RPM', 'Min front RPM'],
+    ],
+  },
+  {
+    title: 'REGEN',
+    fields: [
+      ['VCU_Regen_Enabled', 'Regen enabled', BOOLEAN_LABELS],
+      ['VCU_Regen_Max_Torque', 'Regen max torque'],
+      ['VCU_Regen_Min_Torque', 'Regen min torque'],
+      ['VCU_Regen_Min_BSE_Rear_PSI', 'Regen min rear BSE'],
+      ['VCU_Regen_Min_BSE_Front_PSI', 'Regen min front BSE'],
+      ['VCU_Regen_Max_BSE_Rear_PSI', 'Regen max rear BSE'],
+      ['VCU_Regen_Max_BSE_Front_PSI', 'Regen max front BSE'],
+      ['VCU_Regen_Min_Speed', 'Regen min speed'],
+      ['VCU_Regen_Max_SOC', 'Regen max battery SoC'],
+      ['VCU_Regen_Strategy', 'Regen strategy', REGEN_STRATEGY_LABELS],
+    ],
+  },
+  {
+    title: 'Launch Control',
+    fields: [
+      ['VCU_Launch_Enabled', 'Launch enabled', BOOLEAN_LABELS],
+      ['VCU_Launch_End_RPM', 'Launch end RPM'],
+      ['VCU_Launch_Timeout_ms', 'Launch timeout'],
+      ['VCU_Launch_Max_Slip', 'Launch max slip'],
+      ['VCU_Launch_Best_Curve', 'Best curve', LAUNCH_CURVE_LABELS],
+      ['VCU_Launch_Active_Curve', 'Active curve', LAUNCH_CURVE_LABELS],
+      ['VCU_Launch_Recommended_Slip', 'Recommended slip'],
+    ],
+  },
+  {
+    title: 'Uploaded Launch Curve',
+    fields: [
+      ['VCU_Launch_Actual_RPM_0', 'RPM 0'],
+      ['VCU_Launch_Actual_RPM_1', 'RPM 1'],
+      ['VCU_Launch_Actual_RPM_2', 'RPM 2'],
+      ['VCU_Launch_Actual_RPM_3', 'RPM 3'],
+      ['VCU_Launch_Actual_RPM_4', 'RPM 4'],
+      ['VCU_Launch_Actual_TORQUE_0', 'Torque 0'],
+      ['VCU_Launch_Actual_TORQUE_1', 'Torque 1'],
+      ['VCU_Launch_Actual_TORQUE_2', 'Torque 2'],
+      ['VCU_Launch_Actual_TORQUE_3', 'Torque 3'],
+      ['VCU_Launch_Actual_TORQUE_4', 'Torque 4'],
+    ].map(([signalName, label]) => [signalName.replace('TORQUE', 'Torque'), label]),
+  },
+  {
+    title: 'DEBUG DEFINES',
+    debugFields: DEBUG_FIELDS,
+  },
 ];
+
+const CONFIG_OPTIONS_BY_VALUE = new Map(
+  CONFIG_OPTION_GROUPS.flatMap((group) => group.options.map((option) => [option.value, { ...option, groupLabel: group.label }])),
+);
 
 const getNumeric = (signal) => {
   if (signal === undefined || signal === null) return null;
@@ -167,40 +319,6 @@ const freshnessLabel = (timestamp, nowMs) => {
   if (!timestamp) return 'No data';
   const ageS = Math.max(0, (nowMs - timestamp * 1000) / 1000);
   return ageS < 60 ? `${ageS.toFixed(1)}s ago` : `${Math.round(ageS)}s ago`;
-};
-
-const clampNumber = (value, min, max, fallback = min) => {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return fallback;
-  return Math.min(max, Math.max(min, numeric));
-};
-
-const buildConfigFrame = (mux, config) => {
-  const bytes = new Uint8Array(8);
-  bytes[0] = mux;
-  const view = new DataView(bytes.buffer);
-
-  if (mux === 0) view.setInt16(1, Math.round(Number(config.maxTorqueNm || 0) * 10), true);
-  if (mux === 1) bytes[1] = Number(config.motorDirection) ? 1 : 0;
-  if (mux === 2) bytes[1] = config.regenEnabled ? 1 : 0;
-  if (mux === 3) {
-    let packed = 0;
-    DEBUG_FIELDS.forEach(([key], idx) => {
-      if (config[key]) packed |= (1 << idx);
-    });
-    bytes[1] = packed & 0xFF;
-    bytes[2] = (packed >> 8) & 0xFF;
-  }
-  if (mux === 4) view.setUint16(1, Math.round(clampNumber(config.wheelDiameterIn, 8, 30, 18)), true);
-  if (mux === 5) bytes[1] = config.tcEnabled ? 1 : 0;
-  if (mux === 6) view.setUint16(1, Math.round(clampNumber(config.tcTargetSlip, 1, 5, 1) * 1000), true);
-  if (mux === 7) view.setUint16(1, Math.round(clampNumber(config.tcKp, 0, 32.767, 0) * 1000), true);
-  if (mux === 8) view.setUint16(1, Math.round(clampNumber(config.tcKi, 0, 32.767, 0) * 1000), true);
-  if (mux === 9) view.setUint16(1, Math.round(clampNumber(config.tcKd, 0, 32.767, 0) * 1000), true);
-  if (mux === 10) view.setUint16(1, Math.round(clampNumber(config.tcMinFrontRpm, 0, 32767, 0)), true);
-  if (mux === 11) bytes[1] = config.powerLimitEnabled ? 1 : 0;
-  if (mux === 12) view.setUint16(1, Math.round(clampNumber(config.powerCapKw, 5, 100, 50)), true);
-  return Array.from(bytes);
 };
 
 const getCanonicalFrameName = (decoded) => {
@@ -260,30 +378,7 @@ function HealthPill({ label, signal, goodWhenTrue = true, text = null }) {
 function VCUDashboard({ messages, dbcFiles = [], onSendMessage, staleTimeoutMs = 30000 }) {
   const nowMs = useNowTick(1000);
   const [mux, setMux] = useState(0);
-  const [config, setConfig] = useState({
-    maxTorqueNm: 0,
-    motorDirection: 1,
-    regenEnabled: false,
-    echoDaq: false,
-    ignoreRtdSwitch: false,
-    ignoreRtdBrakes: false,
-    useApps1Only: false,
-    useApps2Only: false,
-    ignoreAppsErrs: false,
-    ignoreBseErrs: false,
-    ignoreSdc: false,
-    ignoreBrakePlausibility: false,
-    alwaysGreen: false,
-    wheelDiameterIn: 18,
-    tcEnabled: false,
-    tcTargetSlip: 1,
-    tcKp: 0,
-    tcKi: 0,
-    tcKd: 0,
-    tcMinFrontRpm: 0,
-    powerLimitEnabled: false,
-    powerCapKw: 50,
-  });
+  const [config, setConfig] = useState(createDefaultVcuConfig);
   const [sendStatus, setSendStatus] = useState(null);
   const [sendBusy, setSendBusy] = useState(false);
   const enabledDbcCount = dbcFiles.filter((file) => file.enabled).length;
@@ -333,6 +428,19 @@ function VCUDashboard({ messages, dbcFiles = [], onSendMessage, staleTimeoutMs =
   const apps2 = getNumeric(getSignal('VCU_APPS2_Value'));
   const apps = getNumeric(getSignal('VCU_APPS_Value'));
   const bsePsi = getNumeric(getSignal('VCU_BSE_PSI'));
+  const selectedConfigOption = CONFIG_OPTIONS_BY_VALUE.get(mux);
+
+  const handleMuxChange = (event) => {
+    const nextMux = Number(event.target.value);
+    setMux(nextMux);
+    setConfig((prev) => ({
+      ...prev,
+      ...getVcuConfigFromSignals(getSignal),
+    }));
+  };
+
+  const launchRpmIndex = mux >= 29 && mux <= 33 ? mux - 29 : null;
+  const launchTorqueIndex = mux >= 34 && mux <= 38 ? mux - 34 : null;
 
   const handleSendConfig = async () => {
     if (typeof onSendMessage !== 'function') {
@@ -342,7 +450,7 @@ function VCUDashboard({ messages, dbcFiles = [], onSendMessage, staleTimeoutMs =
     setSendBusy(true);
     setSendStatus({ type: 'pending', text: 'Sending...' });
     try {
-      const ok = await onSendMessage(SET_VCU_CONFIG_ID, buildConfigFrame(mux, config), true, false);
+      const ok = await onSendMessage(SET_VCU_CONFIG_ID, buildVcuConfigFrame(mux, config), true, false);
       setSendStatus(ok
         ? { type: 'success', text: 'Config frame sent' }
         : { type: 'error', text: 'Frame rejected by backend' });
@@ -489,20 +597,35 @@ function VCUDashboard({ messages, dbcFiles = [], onSendMessage, staleTimeoutMs =
       <section className="vcu-card">
         <div className="vcu-card-header"><Settings size={18} /><h3>Config</h3><Freshness timestamp={frames.VCU_Config?.timestamp} nowMs={nowMs} staleTimeoutMs={staleTimeoutMs} /></div>
         <div className="vcu-config-grid">
-          <div className="vcu-readback-grid">
-            {CONFIG_READBACK_FIELDS.map(([signalName, label, labels]) => (
-              <span key={signalName}>{label} <strong>{labels ? enumLabel(getSignal(signalName), labels) : getDisplay(getSignal(signalName))}</strong></span>
-            ))}
-            {DEBUG_FIELDS.map(([, readSignal, , label]) => (
-              <span key={readSignal}>{label} <strong>{enumLabel(getSignal(readSignal), BOOLEAN_LABELS)}</strong></span>
+          <div className="vcu-config-sections">
+            {CONFIG_READBACK_GROUPS.map((group) => (
+              <section key={group.title} className="vcu-config-group">
+                <div className="vcu-config-group-header">{group.title}</div>
+                <div className="vcu-readback-grid">
+                  {group.fields?.map(([signalName, label, labels]) => (
+                    <span key={signalName} className="vcu-config-item">{label} <strong>{labels ? enumLabel(getSignal(signalName), labels) : getDisplay(getSignal(signalName))}</strong></span>
+                  ))}
+                  {group.debugFields?.map(([, readSignal, , label]) => (
+                    <span key={readSignal} className="vcu-config-item">{label} <strong>{enumLabel(getSignal(readSignal), BOOLEAN_LABELS)}</strong></span>
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
           <div className="vcu-sender">
+            <div className="vcu-sender-header">
+              <span>{selectedConfigOption?.groupLabel || 'CONFIG'}</span>
+              <strong>{selectedConfigOption?.label || 'SELECT_CONFIG'}</strong>
+            </div>
             <label>
               Config group
-              <select value={mux} onChange={(event) => setMux(Number(event.target.value))}>
-                {CONFIG_GROUP_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
+              <select value={mux} onChange={handleMuxChange}>
+                {CONFIG_OPTION_GROUPS.map((group) => (
+                  <optgroup key={group.label} label={group.label}>
+                    {group.options.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
             </label>
@@ -591,6 +714,142 @@ function VCUDashboard({ messages, dbcFiles = [], onSendMessage, staleTimeoutMs =
                 <input type="number" min="5" max="100" step="1" value={config.powerCapKw} onChange={(event) => setConfig((prev) => ({ ...prev, powerCapKw: event.target.value }))} />
               </label>
             )}
+            {mux === 13 && (
+              <label>
+                Regen max torque (Nm)
+                <input type="number" min="0" max="230" step="1" value={config.regenMaxTorqueNm} onChange={(event) => setConfig((prev) => ({ ...prev, regenMaxTorqueNm: event.target.value }))} />
+              </label>
+            )}
+            {mux === 14 && (
+              <label>
+                Regen min torque (Nm)
+                <input type="number" min="0" max="230" step="1" value={config.regenMinTorqueNm} onChange={(event) => setConfig((prev) => ({ ...prev, regenMinTorqueNm: event.target.value }))} />
+              </label>
+            )}
+            {mux === 15 && (
+              <label>
+                Regen min rear BSE (PSI)
+                <input type="number" min="0" max="10000" step="1" value={config.regenMinBseRearPsi} onChange={(event) => setConfig((prev) => ({ ...prev, regenMinBseRearPsi: event.target.value }))} />
+              </label>
+            )}
+            {mux === 16 && (
+              <label>
+                Regen min front BSE (PSI)
+                <input type="number" min="0" max="10000" step="1" value={config.regenMinBseFrontPsi} onChange={(event) => setConfig((prev) => ({ ...prev, regenMinBseFrontPsi: event.target.value }))} />
+              </label>
+            )}
+            {mux === 17 && (
+              <label>
+                Regen max rear BSE (PSI)
+                <input type="number" min="0" max="10000" step="1" value={config.regenMaxBseRearPsi} onChange={(event) => setConfig((prev) => ({ ...prev, regenMaxBseRearPsi: event.target.value }))} />
+              </label>
+            )}
+            {mux === 18 && (
+              <label>
+                Regen max front BSE (PSI)
+                <input type="number" min="0" max="10000" step="1" value={config.regenMaxBseFrontPsi} onChange={(event) => setConfig((prev) => ({ ...prev, regenMaxBseFrontPsi: event.target.value }))} />
+              </label>
+            )}
+            {mux === 19 && (
+              <label>
+                Regen min speed (RPM)
+                <input type="number" min="0" max="32767" step="1" value={config.regenMinSpeedRpm} onChange={(event) => setConfig((prev) => ({ ...prev, regenMinSpeedRpm: event.target.value }))} />
+              </label>
+            )}
+            {mux === 20 && (
+              <label>
+                Regen max battery SoC (%)
+                <input type="number" min="0" max="100" step="1" value={config.regenMaxSocPct} onChange={(event) => setConfig((prev) => ({ ...prev, regenMaxSocPct: event.target.value }))} />
+              </label>
+            )}
+            {mux === 21 && (
+              <label>
+                Regen strategy
+                <select value={config.regenStrategy} onChange={(event) => setConfig((prev) => ({ ...prev, regenStrategy: Number(event.target.value) }))}>
+                  <option value={0}>FRONT_ONLY</option>
+                  <option value={1}>REAR_ONLY</option>
+                  <option value={2}>AVERAGED</option>
+                  <option value={3}>RYDER</option>
+                </select>
+              </label>
+            )}
+            {mux === 22 && (
+              <label className="vcu-checkbox">
+                <input type="checkbox" checked={config.launchEnabled} onChange={(event) => setConfig((prev) => ({ ...prev, launchEnabled: event.target.checked }))} />
+                Launch enabled
+              </label>
+            )}
+            {mux === 23 && (
+              <label>
+                Launch end RPM
+                <input type="number" min="0" max="32767" step="1" value={config.launchEndRpm} onChange={(event) => setConfig((prev) => ({ ...prev, launchEndRpm: event.target.value }))} />
+              </label>
+            )}
+            {mux === 24 && (
+              <label>
+                Launch timeout (ms)
+                <input type="number" min="0" max="60000" step="1" value={config.launchTimeoutMs} onChange={(event) => setConfig((prev) => ({ ...prev, launchTimeoutMs: event.target.value }))} />
+              </label>
+            )}
+            {mux === 25 && (
+              <label>
+                Launch max slip
+                <input type="number" min="1" max="5" step="0.001" value={config.launchMaxSlip} onChange={(event) => setConfig((prev) => ({ ...prev, launchMaxSlip: event.target.value }))} />
+              </label>
+            )}
+            {mux === 26 && (
+              <label>
+                Launch best curve
+                <select value={config.launchBestCurve} onChange={(event) => setConfig((prev) => ({ ...prev, launchBestCurve: Number(event.target.value) }))}>
+                  <option value={0}>CURVE_A</option>
+                  <option value={1}>CURVE_B</option>
+                  <option value={2}>CURVE_C</option>
+                </select>
+              </label>
+            )}
+            {mux === 27 && (
+              <label>
+                Launch active curve
+                <select value={config.launchActiveCurve} onChange={(event) => setConfig((prev) => ({ ...prev, launchActiveCurve: Number(event.target.value) }))}>
+                  <option value={0}>CURVE_A</option>
+                  <option value={1}>CURVE_B</option>
+                  <option value={2}>CURVE_C</option>
+                  <option value={3}>UPLOADED</option>
+                </select>
+              </label>
+            )}
+            {mux === 28 && (
+              <label>
+                Launch recommended slip
+                <input type="number" min="1" max="5" step="0.001" value={config.launchRecommendedSlip} onChange={(event) => setConfig((prev) => ({ ...prev, launchRecommendedSlip: event.target.value }))} />
+              </label>
+            )}
+            {launchRpmIndex !== null && (
+              <label>
+                Launch actual RPM {launchRpmIndex}
+                <input
+                  type="number"
+                  min="0"
+                  max="32767"
+                  step="1"
+                  value={config[`launchActualRpm${launchRpmIndex}`]}
+                  onChange={(event) => setConfig((prev) => ({ ...prev, [`launchActualRpm${launchRpmIndex}`]: event.target.value }))}
+                />
+              </label>
+            )}
+            {launchTorqueIndex !== null && (
+              <label>
+                Launch actual torque {launchTorqueIndex} (Nm)
+                <input
+                  type="number"
+                  min="0"
+                  max="230"
+                  step="1"
+                  value={config[`launchActualTorque${launchTorqueIndex}`]}
+                  onChange={(event) => setConfig((prev) => ({ ...prev, [`launchActualTorque${launchTorqueIndex}`]: event.target.value }))}
+                />
+              </label>
+            )}
             <button type="button" onClick={handleSendConfig} disabled={sendBusy}>
               {sendBusy ? 'Sending...' : 'Send Config'}
             </button>
@@ -601,5 +860,4 @@ function VCUDashboard({ messages, dbcFiles = [], onSendMessage, staleTimeoutMs =
   );
 }
 
-export { buildConfigFrame };
 export default VCUDashboard;

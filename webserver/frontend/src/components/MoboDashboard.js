@@ -42,9 +42,14 @@ const RELAY_CHANNELS = [
 ];
 
 const SAFETY_INPUTS = [
-  { key: 'sdc1', label: 'SDC1', raw: 'SDC1_Raw', debounced: 'SDC1_Debounced', latched: 'SDC1_Latched' },
-  { key: 'sdc2', label: 'SDC2', raw: 'SDC2_Raw', debounced: 'SDC2_Debounced', latched: 'SDC2_Latched' },
-  { key: 'sdc3', label: 'SDC3', raw: 'SDC3_Raw', debounced: 'SDC3_Debounced', latched: 'SDC3_Latched' },
+  {
+    key: 'vibLights',
+    label: 'VIB LIGHTS',
+    raw: ['SDC1_Raw', 'SDC2_Raw'],
+    debounced: ['SDC1_Debounced', 'SDC2_Debounced'],
+    latched: ['SDC1_Latched', 'SDC2_Latched'],
+  },
+  { key: 'buttonsLoop', label: 'BUTTONS LOOP', raw: 'SDC3_Raw', debounced: 'SDC3_Debounced', latched: 'SDC3_Latched' },
   { key: 'bms', label: 'BMS', raw: 'BMS_Raw', debounced: 'BMS_Debounced', latched: 'BMS_Latched' },
   { key: 'bspd', label: 'BSPD', raw: 'BSPD_Raw', debounced: 'BSPD_Debounced', latched: 'BSPD_Latched' },
   { key: 'imd', label: 'IMD', raw: 'IMD_Raw', debounced: 'IMD_Debounced', latched: 'IMD_Latched' },
@@ -136,6 +141,15 @@ const getRelaySignal = (signals, channel, kind) => getSignalByNames(
 const getSafetyFault = (signal) => {
   const value = isBitSet(signal);
   return value === null ? null : !value;
+};
+
+const getCombinedSafetyFault = (signals, names) => {
+  const signalNames = Array.isArray(names) ? names : [names];
+  const values = signalNames.map((name) => getSafetyFault(signals?.[name]));
+
+  if (values.some((value) => value === true)) return true;
+  if (values.every((value) => value === false)) return false;
+  return null;
 };
 
 const formatBool = (signal, trueLabel = 'ON', falseLabel = 'OFF') => {
@@ -598,7 +612,7 @@ function MoboDashboard({
               <div className="mobo-safety-table">
                 <div className="mobo-safety-head"><span>Input</span><span>Raw</span><span>Debounced</span><span>Latched</span></div>
                 {SAFETY_INPUTS.map((input) => {
-                  const values = [input.raw, input.debounced, input.latched].map((name) => getSafetyFault(safety?.signals?.[name]));
+                  const values = [input.raw, input.debounced, input.latched].map((names) => getCombinedSafetyFault(safety?.signals, names));
                   return (
                     <div key={input.key} className="mobo-safety-row">
                       <span>{input.label}</span>

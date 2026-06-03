@@ -1,0 +1,13 @@
+{
+  "widgets": [
+    {
+      "id": "w_mpw1pxti_u6vjf9",
+      "signal_name": "Acc_Fans_Active",
+      "source_dbc": "Baby_MOBO.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
+    }
+  ]
+}

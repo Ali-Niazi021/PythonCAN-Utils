@@ -1,0 +1,171 @@
+.vcu-launch-dashboard {
+  gap: 18px;
+}
+
+.vcu-launch-copy {
+  margin: 0;
+  color: #9ca3af;
+  font-size: 13px;
+}
+
+.vcu-launch-sections {
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.vcu-launch-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.vcu-launch-action-grid button,
+.vcu-launch-button-row button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 6px;
+  background: #dc2626;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.vcu-launch-action-grid button:disabled,
+.vcu-launch-button-row button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.vcu-launch-secondary {
+  background: #27272a !important;
+  border: 1px solid #3f3f46 !important;
+}
+
+.vcu-launch-guardrails {
+  display: grid;
+  gap: 6px;
+  color: #a3a3a3;
+  font-size: 12px;
+}
+
+.vcu-launch-warning {
+  color: #fde68a;
+}
+
+.vcu-launch-ok {
+  color: #86efac;
+}
+
+.vcu-launch-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  color: #aaa;
+  font-size: 13px;
+}
+
+.vcu-launch-summary-grid strong {
+  display: block;
+  margin-top: 4px;
+  color: #fff;
+}
+
+.vcu-launch-results-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.vcu-launch-result-card {
+  padding: 14px;
+  background: #111;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+}
+
+.vcu-launch-result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.vcu-launch-editor-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 460px) minmax(280px, 1fr);
+  gap: 18px;
+}
+
+.vcu-launch-editor-form {
+  gap: 14px;
+}
+
+.vcu-launch-editor-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.vcu-launch-curve-table,
+.vcu-launch-readback-table {
+  display: grid;
+  gap: 8px;
+}
+
+.vcu-launch-curve-head,
+.vcu-launch-curve-row {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.vcu-launch-curve-head {
+  color: #888;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.vcu-launch-curve-row input,
+.vcu-launch-curve-row span {
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid #333;
+  border-radius: 6px;
+  background: #1b1b1b;
+  color: #fff;
+}
+
+.vcu-launch-curve-row.readback span {
+  display: inline-flex;
+  align-items: center;
+}
+
+.vcu-launch-button-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 960px) {
+  .vcu-launch-editor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .vcu-launch-editor-meta {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .vcu-launch-action-grid,
+  .vcu-launch-curve-head,
+  .vcu-launch-curve-row {
+    grid-template-columns: 1fr;
+  }
+
+  .vcu-launch-result-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

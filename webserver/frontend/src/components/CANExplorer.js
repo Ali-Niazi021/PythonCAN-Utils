@@ -1226,6 +1226,12 @@ function CANExplorer({
               >
                 VCU Dashboard
               </button>
+              <button
+                className={`sidebar-tab submenu ${activeTab === 'vcu-launch-control' ? 'active' : ''}`}
+                onClick={() => onTabChange('vcu-launch-control')}
+              >
+                Launch Control
+              </button>
             </div>
             <div className="sidebar-menu-group">
               <div className="sidebar-menu-header">Inverter</div>

@@ -157,6 +157,27 @@
   gap: 18px;
 }
 
+.vcu-config-sections {
+  display: grid;
+  gap: 14px;
+}
+
+.vcu-config-group {
+  padding: 14px;
+  background: #111;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+}
+
+.vcu-config-group-header {
+  margin-bottom: 12px;
+  color: #f3f4f6;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .vcu-readback-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -165,8 +186,33 @@
   font-size: 13px;
 }
 
+.vcu-config-item {
+  display: block;
+}
+
 .vcu-readback-grid strong { display: block; margin-top: 4px; color: #fff; }
 .vcu-sender { display: flex; flex-direction: column; gap: 12px; padding: 14px; background: #111; border: 1px solid #2a2a2a; border-radius: 8px; }
+.vcu-sender-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #262626;
+}
+
+.vcu-sender-header span {
+  color: #888;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.vcu-sender-header strong {
+  color: #fff;
+  font-size: 14px;
+}
+
 .vcu-sender label { display: flex; flex-direction: column; gap: 6px; color: #ddd; font-size: 13px; }
 .vcu-sender select,
 .vcu-sender input[type="number"] {
