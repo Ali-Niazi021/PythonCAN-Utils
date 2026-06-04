@@ -1,4 +1,24 @@
 {
   "dbc_file": "dbcset-de3c6063111a",
-  "items": []
+  "items": [
+    {
+      "id": "1780535421501-0.8177510212826987",
+      "can_id": 193,
+      "data": [
+        237,
+        0,
+        1,
+        0,
+        254,
+        255,
+        0,
+        0
+      ],
+      "is_extended": false,
+      "message_name": null,
+      "signals": null,
+      "description": "Enable Inverter High Speed",
+      "cycle_time": null
+    }
+  ]
 }

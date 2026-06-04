@@ -22,24 +22,33 @@ const HVC_TEST_DEBOUNCE_MS = 250;
 
 // Map DBC message names → state key on this component.
 const HVC_MESSAGE_MAP = {
+  HVC_IO_Summary: 'ioSummary',
   IO_Summary: 'ioSummary',
+  HVC_IO_Current: 'ioCurrent',
   IO_Current: 'ioCurrent',
+  HVC_IO_VSense: 'ioVSense',
   IO_VSense: 'ioVSense',
+  HVC_BMS_State: 'bmsState',
   BMS_State: 'bmsState',
+  HVC_SOC: 'soc',
   SOC: 'soc',
+  HVC_ACC_Summary: 'accSummary',
   ACC_Summary: 'accSummary',
+  HVC_Current_Limit: 'currentLimit',
   Current_Limit: 'currentLimit',
+  HVC_PL_Signal: 'plSignal',
   PL_Signal: 'plSignal',
+  HVC_EMeter_Therms: 'emeterTherms',
   EMeter_Therms: 'emeterTherms',
 };
 
 const EMETER_THERM_SIGNALS = [
-  'EMeter_Therm_0_C',
-  'EMeter_Therm_1_C',
-  'EMeter_Therm_2_C',
-  'EMeter_Therm_3_C',
-  'EMeter_Therm_4_C',
-  'EMeter_Therm_5_C',
+  ['HVC_EMeter_Therm_0_C', 'EMeter_Therm_0_C'],
+  ['HVC_EMeter_Therm_1_C', 'EMeter_Therm_1_C'],
+  ['HVC_EMeter_Therm_2_C', 'EMeter_Therm_2_C'],
+  ['HVC_EMeter_Therm_3_C', 'EMeter_Therm_3_C'],
+  ['HVC_EMeter_Therm_4_C', 'EMeter_Therm_4_C'],
+  ['HVC_EMeter_Therm_5_C', 'EMeter_Therm_5_C'],
 ];
 
 // Known BMS_State enum names from hvc.dbc.
@@ -94,13 +103,31 @@ const formatCapacityAh = (signal) => {
   return v === null ? '--' : `${(v / 3600).toFixed(2)} Ah`;
 };
 
+const getSignal = (signals, ...names) => {
+  if (!signals) return undefined;
+  for (const name of names) {
+    if (signals[name] !== undefined) return signals[name];
+  }
+  return undefined;
+};
+
+const getSignalEntry = (signals, ...names) => {
+  if (!signals) return { name: null, signal: undefined };
+  for (const name of names) {
+    if (signals[name] !== undefined) return { name, signal: signals[name] };
+  }
+  return { name: null, signal: undefined };
+};
+
 const normalizeStateName = (raw) => {
   const upper = String(raw || '').toUpperCase();
   return HVC_BMS_STATES.find((s) => upper.includes(s)) || null;
 };
 
 const formatFlagLabel = (name) => name
+  .replace(/^HVC_Err_/, '')
   .replace(/^Err_/, '')
+  .replace(/^HVC_/, '')
   .replace(/([A-Z])/g, ' $1')
   .replace(/_/g, ' ')
   .replace(/\s+/g, ' ')
@@ -328,10 +355,14 @@ function HVCDashboard({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
   const plSignal = frames.plSignal?.signals || {};
   const emeterTherms = frames.emeterTherms?.signals || {};
 
-  const stateText = getDisplay(bmsState.BMS_State, '--');
+  const sdcStatus = getSignalEntry(ioSummary, 'HVC_SDC_Open', 'SDC_Open', 'SDC_Closed');
+  const imdStatus = getSignalEntry(ioSummary, 'HVC_IMD_Fault', 'IMD_Fault', 'IMD_Ok');
+  const bmsFaultStatus = getSignalEntry(ioSummary, 'HVC_BMS_Fault', 'BMS_Fault', 'BMS_Fault_Ok');
+
+  const stateText = getDisplay(getSignal(bmsState, 'HVC_BMS_State', 'BMS_State'), '--');
   const normalizedState = normalizeStateName(stateText);
   const stateFlags = Object.entries(bmsState)
-    .filter(([name]) => name.startsWith('Err_'))
+    .filter(([name]) => name.startsWith('HVC_Err_') || name.startsWith('Err_'))
     .sort(([a], [b]) => a.localeCompare(b));
 
   const renderFreshness = (frame) => (
@@ -340,10 +371,10 @@ function HVCDashboard({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
     </span>
   );
 
-  const renderFaultBadge = (label, signal) => {
+  const renderFaultBadge = (label, signal, invert = false) => {
     const num = getNumeric(signal);
     if (num === null) return <span className="hvc-badge unknown">{label}: ?</span>;
-    const faulted = num !== 0;
+    const faulted = invert ? num === 0 : num !== 0;
     return <span className={`hvc-badge ${faulted ? 'bad' : 'good'}`}>{label}: {faulted ? 'FAULT' : 'OK'}</span>;
   };
 
@@ -401,9 +432,9 @@ function HVCDashboard({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
           <div className="hvc-card-header">
             <Battery size={18} /><span>State of Charge</span>{renderFreshness(frames.soc)}
           </div>
-          <div className="hvc-kpi-value">{formatPercent(soc.SOC_Percent)}</div>
-          <div className="hvc-kpi-sub">Capacity: <strong>{formatCapacityAh(soc.SOC_Capacity_As)}</strong></div>
-          <div className="hvc-kpi-sub">Delta: <strong>{formatCapacityAh(soc.SOC_Delta_As)}</strong></div>
+          <div className="hvc-kpi-value">{formatPercent(getSignal(soc, 'HVC_SOC_Percent', 'SOC_Percent'))}</div>
+          <div className="hvc-kpi-sub">Capacity: <strong>{formatCapacityAh(getSignal(soc, 'HVC_SOC_Capacity_As', 'SOC_Capacity_As'))}</strong></div>
+          <div className="hvc-kpi-sub">Delta: <strong>{formatCapacityAh(getSignal(soc, 'HVC_SOC_Delta_As', 'SOC_Delta_As'))}</strong></div>
         </div>
 
         <div className="hvc-kpi-card">
@@ -411,8 +442,8 @@ function HVCDashboard({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
             <Zap size={18} /><span>Voltage Sense</span>{renderFreshness(frames.ioVSense)}
           </div>
           <div className="hvc-split-grid">
-            <div><span>Battery</span><strong>{formatVoltsFromMv(ioVSense.Batt_Voltage_mV)}</strong></div>
-            <div><span>Inverter</span><strong>{formatVoltsFromMv(ioVSense.Inv_Voltage_mV)}</strong></div>
+            <div><span>Battery</span><strong>{formatVoltsFromMv(getSignal(ioVSense, 'HVC_Batt_Voltage_mV', 'Batt_Voltage_mV'))}</strong></div>
+            <div><span>Inverter</span><strong>{formatVoltsFromMv(getSignal(ioVSense, 'HVC_Inv_Voltage_mV', 'Inv_Voltage_mV'))}</strong></div>
           </div>
         </div>
 
@@ -421,8 +452,8 @@ function HVCDashboard({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
             <Activity size={18} /><span>Bus Current</span>{renderFreshness(frames.ioCurrent)}
           </div>
           <div className="hvc-split-grid">
-            <div><span>Low Channel</span><strong>{formatAmpsFromMa(ioCurrent.Current_Low_mA)}</strong></div>
-            <div><span>High Channel</span><strong>{formatAmpsFromMa(ioCurrent.Current_High_mA)}</strong></div>
+            <div><span>Low Channel</span><strong>{formatAmpsFromMa(getSignal(ioCurrent, 'HVC_Current_Low_mA', 'Current_Low_mA'))}</strong></div>
+            <div><span>High Channel</span><strong>{formatAmpsFromMa(getSignal(ioCurrent, 'HVC_Current_High_mA', 'Current_High_mA'))}</strong></div>
           </div>
         </div>
       </div>
@@ -433,10 +464,10 @@ function HVCDashboard({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
             <Thermometer size={17} /><h3>Pack Extremes</h3>{renderFreshness(frames.accSummary)}
           </div>
           <div className="hvc-metric-grid">
-            <div className="hvc-metric"><span>V Min</span><strong>{formatVoltsFromMv(acc.Acc_Volt_Min_mV)}</strong></div>
-            <div className="hvc-metric"><span>V Max</span><strong>{formatVoltsFromMv(acc.Acc_Volt_Max_mV)}</strong></div>
-            <div className="hvc-metric"><span>T Min</span><strong>{formatTempC(acc.Acc_Temp_Min_C)}</strong></div>
-            <div className="hvc-metric"><span>T Max</span><strong>{formatTempC(acc.Acc_Temp_Max_C)}</strong></div>
+            <div className="hvc-metric"><span>V Min</span><strong>{formatVoltsFromMv(getSignal(acc, 'HVC_Acc_Volt_Min_mV', 'Acc_Volt_Min_mV'))}</strong></div>
+            <div className="hvc-metric"><span>V Max</span><strong>{formatVoltsFromMv(getSignal(acc, 'HVC_Acc_Volt_Max_mV', 'Acc_Volt_Max_mV'))}</strong></div>
+            <div className="hvc-metric"><span>T Min</span><strong>{formatTempC(getSignal(acc, 'HVC_Acc_Temp_Min_C', 'Acc_Temp_Min_C'))}</strong></div>
+            <div className="hvc-metric"><span>T Max</span><strong>{formatTempC(getSignal(acc, 'HVC_Acc_Temp_Max_C', 'Acc_Temp_Max_C'))}</strong></div>
           </div>
         </section>
 
@@ -445,13 +476,13 @@ function HVCDashboard({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
             <Gauge size={17} /><h3>IO Summary</h3>{renderFreshness(frames.ioSummary)}
           </div>
           <div className="hvc-badge-row">
-            {renderFaultBadge('SDC', ioSummary.SDC_Closed)}
-            {renderFaultBadge('IMD', ioSummary.IMD_Ok)}
-            {renderFaultBadge('BMS', ioSummary.BMS_Fault_Ok)}
+            {renderFaultBadge('SDC', sdcStatus.signal, sdcStatus.name === 'SDC_Closed')}
+            {renderFaultBadge('IMD', imdStatus.signal, imdStatus.name === 'IMD_Ok')}
+            {renderFaultBadge('BMS', bmsFaultStatus.signal, bmsFaultStatus.name === 'BMS_Fault_Ok')}
           </div>
           <div className="hvc-metric single">
             <span>Reference Temp</span>
-            <strong>{formatTempC(ioSummary.Ref_Temp_C)}</strong>
+            <strong>{formatTempC(getSignal(ioSummary, 'HVC_Ref_Temp_C', 'Ref_Temp_C'))}</strong>
           </div>
         </section>
 
@@ -495,8 +526,8 @@ function HVCDashboard({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
             <Activity size={17} /><h3>Current Limits</h3>{renderFreshness(frames.currentLimit)}
           </div>
           <div className="hvc-metric-grid">
-            <div className="hvc-metric"><span>Charge Limit</span><strong>{formatAmpsFromMa(currentLimit.Positive_Current_Limit_mA)}</strong></div>
-            <div className="hvc-metric"><span>Discharge Limit</span><strong>{formatAmpsFromMa(currentLimit.Negative_Current_Limit_mA)}</strong></div>
+            <div className="hvc-metric"><span>Charge Limit</span><strong>{formatAmpsFromMa(getSignal(currentLimit, 'HVC_Positive_Current_Limit_mA', 'Positive_Current_Limit_mA'))}</strong></div>
+            <div className="hvc-metric"><span>Discharge Limit</span><strong>{formatAmpsFromMa(getSignal(currentLimit, 'HVC_Negative_Current_Limit_mA', 'Negative_Current_Limit_mA'))}</strong></div>
           </div>
         </section>
 
@@ -506,7 +537,7 @@ function HVCDashboard({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
           </div>
           <div className="hvc-metric single">
             <span>Reason</span>
-            <strong>{getDisplay(plSignal.PL_Signal_Reason)}</strong>
+            <strong>{getDisplay(getSignal(plSignal, 'HVC_PL_Signal_Reason', 'PL_Signal_Reason'))}</strong>
           </div>
         </section>
 
@@ -515,11 +546,11 @@ function HVCDashboard({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
             <Thermometer size={17} /><h3>E-Meter Thermistors</h3>{renderFreshness(frames.emeterTherms)}
           </div>
           <div className="hvc-emeter-grid">
-            {EMETER_THERM_SIGNALS.map((name, idx) => {
-              const raw = getNumeric(emeterTherms[name]);
+            {EMETER_THERM_SIGNALS.map((names, idx) => {
+              const raw = getNumeric(getSignal(emeterTherms, ...names));
               const invalid = raw === null || raw === 0;
               return (
-                <div key={name} className={`hvc-emeter-cell ${invalid ? 'invalid' : ''}`}>
+                <div key={names[0]} className={`hvc-emeter-cell ${invalid ? 'invalid' : ''}`}>
                   <span className="hvc-emeter-label">T{idx}</span>
                   <span className="hvc-emeter-value">
                     {invalid ? '--' : `${raw} °C`}

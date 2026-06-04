@@ -134,6 +134,15 @@
       "display_type": "auto",
       "decimals": null,
       "size": "medium"
+    },
+    {
+      "id": "w_mpxtsu3p_cqfip2",
+      "signal_name": "Batt_Voltage_mV",
+      "source_dbc": "hvc.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
     }
   ]
 }
