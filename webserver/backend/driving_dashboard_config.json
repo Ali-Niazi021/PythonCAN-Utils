@@ -10,6 +10,24 @@
       "size": "medium"
     },
     {
+      "id": "w_mpz2rfs8_zqw442",
+      "signal_name": "HVC_Current_Low_mA",
+      "source_dbc": "hvc.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
+    },
+    {
+      "id": "w_mpz23t5u_2xb4ph",
+      "signal_name": "HVC_Current_High_mA",
+      "source_dbc": "hvc.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
+    },
+    {
       "id": "w_mpxhs56w_eqk66b",
       "signal_name": "DBF_WSPD_FL_MPH",
       "source_dbc": "DAQ-Firmware.dbc",
@@ -28,90 +46,18 @@
       "size": "small"
     },
     {
-      "id": "w_mpxhv25x_731zrj",
-      "signal_name": "VCU_TRC_State_Machine",
-      "source_dbc": "VCU.dbc",
+      "id": "w_mpz24mlu_eoox7g",
+      "signal_name": "DBL_WSPD_BL_MPH",
+      "source_dbc": "DAQ-Firmware.dbc",
       "label": null,
       "display_type": "auto",
       "decimals": null,
-      "size": "medium"
+      "size": "small"
     },
     {
       "id": "w_mpxhv7et_x49tnf",
       "signal_name": "VCU_State",
       "source_dbc": "VCU.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mpxhvfp2_xy4yzg",
-      "signal_name": "INV_Motor_Speed",
-      "source_dbc": "BMS-Inverter-Only.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mpxhvqcy_kkxh7y",
-      "signal_name": "Acc_Temp_Max_C",
-      "source_dbc": "hvc.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mpxhvuz4_4ugzoc",
-      "signal_name": "Acc_Temp_Min_C",
-      "source_dbc": "hvc.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mpxhw1op_2z0rwu",
-      "signal_name": "Acc_Volt_Min_mV",
-      "source_dbc": "hvc.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mpxhw4nh_5g2m2s",
-      "signal_name": "Acc_Volt_Max_mV",
-      "source_dbc": "hvc.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mpxhwgv1_53wd4u",
-      "signal_name": "Current_High_mA",
-      "source_dbc": "hvc.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mpxhwteb_hpmehf",
-      "signal_name": "VCU_INV_Discharge_Current_Limit",
-      "source_dbc": "VCU.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mpxhxokt_pv4cu2",
-      "signal_name": "BSE_PSI_Rear",
-      "source_dbc": "Baby_MOBO.dbc",
       "label": null,
       "display_type": "auto",
       "decimals": null,
@@ -127,6 +73,15 @@
       "size": "medium"
     },
     {
+      "id": "w_mpz239fs_sonyyv",
+      "signal_name": "MOBO_BSE_PSI_Rear",
+      "source_dbc": "Baby_MOBO.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
+    },
+    {
       "id": "w_mpxi00np_2m3nt4",
       "signal_name": "INV_Torque_Feedback",
       "source_dbc": "BMS-Inverter-Only.dbc",
@@ -136,9 +91,108 @@
       "size": "medium"
     },
     {
-      "id": "w_mpxtsu3p_cqfip2",
-      "signal_name": "Batt_Voltage_mV",
+      "id": "w_mpz22pff_d2vbji",
+      "signal_name": "HVC_Acc_Temp_Max_C",
       "source_dbc": "hvc.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
+    },
+    {
+      "id": "w_mpz22u1k_23vqok",
+      "signal_name": "HVC_Acc_Temp_Min_C",
+      "source_dbc": "hvc.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
+    },
+    {
+      "id": "w_mpz2309e_jj9fb2",
+      "signal_name": "MOBO_Battery_Voltage",
+      "source_dbc": "Baby_MOBO.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
+    },
+    {
+      "id": "w_mpz23yz2_v6ae7i",
+      "signal_name": "HVC_Acc_Volt_Max_mV",
+      "source_dbc": "hvc.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
+    },
+    {
+      "id": "w_mpz242y0_o0zpy7",
+      "signal_name": "HVC_Acc_Volt_Min_mV",
+      "source_dbc": "hvc.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
+    },
+    {
+      "id": "w_mpz25hbr_pqkbhq",
+      "signal_name": "HS_Motor_Speed",
+      "source_dbc": "BMS-Inverter-Only.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
+    },
+    {
+      "id": "w_mpz2g1h1_6a7vej",
+      "signal_name": "INV_Coolant_Temp",
+      "source_dbc": "BMS-Inverter-Only.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
+    },
+    {
+      "id": "w_mpz2g8mo_nnnsri",
+      "signal_name": "MOBO_Acc_Fans_Active",
+      "source_dbc": "Baby_MOBO.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
+    },
+    {
+      "id": "w_mpz2gei7_bc10f6",
+      "signal_name": "MOBO_Pump_Actual",
+      "source_dbc": "Baby_MOBO.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
+    },
+    {
+      "id": "w_mpz2gnue_k0ue8k",
+      "signal_name": "MOBO_Radiator_Fans_Actual",
+      "source_dbc": "Baby_MOBO.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
+    },
+    {
+      "id": "w_mpz2hjcd_ptrpg1",
+      "signal_name": "HVC_SOC_Percent",
+      "source_dbc": "hvc.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
+    },
+    {
+      "id": "w_mpz4xdm6_ibnfsx",
+      "signal_name": "Speed",
+      "source_dbc": "can9-database-01.09.dbc",
       "label": null,
       "display_type": "auto",
       "decimals": null,

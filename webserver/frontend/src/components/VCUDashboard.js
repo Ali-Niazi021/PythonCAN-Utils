@@ -72,6 +72,7 @@ const VCU_FRAME_SIGNALS = {
     'VCU_Regen_Max_BSE_Front_PSI',
     'VCU_Regen_Min_Speed',
     'VCU_Regen_Max_SOC',
+    'VCU_Regen_Max_APPS',
     'VCU_Regen_Strategy',
     'VCU_Launch_Enabled',
     'VCU_Launch_End_RPM',
@@ -194,6 +195,7 @@ const CONFIG_OPTION_GROUPS = [
       { value: 20, label: 'REGEN_MAX_SOC' },
       { value: 21, label: 'REGEN_STRATEGY' },
       { value: 39, label: 'REGEN_SOC_GATE_ENABLED' },
+      { value: 40, label: 'REGEN_MAX_APPS' },
     ],
   },
   {
@@ -274,6 +276,7 @@ const CONFIG_READBACK_GROUPS = [
       ['VCU_Regen_Max_BSE_Front_PSI', 'Regen max front BSE'],
       ['VCU_Regen_Min_Speed', 'Regen min speed'],
       ['VCU_Regen_Max_SOC', 'Regen max battery SoC'],
+      ['VCU_Regen_Max_APPS', 'Regen max APPS'],
       ['VCU_Regen_Strategy', 'Regen strategy', REGEN_STRATEGY_LABELS],
     ],
   },
@@ -859,6 +862,12 @@ function VCUDashboard({ messages, dbcFiles = [], onSendMessage, staleTimeoutMs =
               <label className="vcu-checkbox">
                 <input type="checkbox" checked={config.regenSocGateEnabled} onChange={(event) => setConfig((prev) => ({ ...prev, regenSocGateEnabled: event.target.checked }))} />
                 Regen SoC cap enabled
+              </label>
+            )}
+            {mux === 40 && (
+              <label>
+                Regen max APPS (%)
+                <input type="number" min="0" max="100" step="1" value={config.regenMaxAppsPct} onChange={(event) => setConfig((prev) => ({ ...prev, regenMaxAppsPct: event.target.value }))} />
               </label>
             )}
             {mux === 22 && (

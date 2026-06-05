@@ -25,16 +25,16 @@ const MOBO_MESSAGE_NAMES = new Set([
 ]);
 
 const RELAY_CHANNELS = [
-  { key: 'pump', label: 'Pump', bit: 0, commanded: 'Pump_Commanded', actual: 'Pump_Actual', state: 'Pump_State' },
-  { key: 'drs', label: 'DRS', bit: 1, commanded: 'DRS_Commanded', actual: 'DRS_Actual', state: 'DRS_State' },
-  { key: 'fans', label: 'Fans', bit: 2, commanded: 'Fans_Commanded', actual: 'Fans_Actual', state: 'Fans_State' },
+  { key: 'pump', label: 'Pump', bit: 0, commanded: 'MOBO_Pump_Commanded', actual: 'MOBO_Pump_Actual', state: 'MOBO_Pump_State' },
+  { key: 'drs', label: 'DRS', bit: 1, commanded: 'MOBO_DRS_Commanded', actual: 'MOBO_DRS_Actual', state: 'MOBO_DRS_State' },
+  { key: 'fans', label: 'Fans', bit: 2, commanded: 'MOBO_Fans_Commanded', actual: 'MOBO_Fans_Actual', state: 'MOBO_Fans_State' },
   {
     key: 'radiatorFans',
     label: 'Radiator Fans',
     bit: 3,
-    commanded: 'Radiator_Fans_Commanded',
-    actual: 'Radiator_Fans_Actual',
-    state: 'Radiator_Fans_State',
+    commanded: 'MOBO_Radiator_Fans_Commanded',
+    actual: 'MOBO_Radiator_Fans_Actual',
+    state: 'MOBO_Radiator_Fans_State',
     legacyCommanded: 'Rad_Commanded',
     legacyActual: 'Rad_Actual',
     legacyState: 'Rad_State',
@@ -45,14 +45,14 @@ const SAFETY_INPUTS = [
   {
     key: 'vibLights',
     label: 'VIB LIGHTS',
-    raw: ['SDC1_Raw', 'SDC2_Raw'],
-    debounced: ['SDC1_Debounced', 'SDC2_Debounced'],
-    latched: ['SDC1_Latched', 'SDC2_Latched'],
+    raw: ['MOBO_SDC1_Raw', 'MOBO_SDC2_Raw'],
+    debounced: ['MOBO_SDC1_Debounced', 'MOBO_SDC2_Debounced'],
+    latched: ['MOBO_SDC1_Latched', 'MOBO_SDC2_Latched'],
   },
-  { key: 'buttonsLoop', label: 'BUTTONS LOOP', raw: 'SDC3_Raw', debounced: 'SDC3_Debounced', latched: 'SDC3_Latched' },
-  { key: 'bms', label: 'BMS', raw: 'BMS_Raw', debounced: 'BMS_Debounced', latched: 'BMS_Latched' },
-  { key: 'bspd', label: 'BSPD', raw: 'BSPD_Raw', debounced: 'BSPD_Debounced', latched: 'BSPD_Latched' },
-  { key: 'imd', label: 'IMD', raw: 'IMD_Raw', debounced: 'IMD_Debounced', latched: 'IMD_Latched' },
+  { key: 'buttonsLoop', label: 'BUTTONS LOOP', raw: 'MOBO_SDC3_Raw', debounced: 'MOBO_SDC3_Debounced', latched: 'MOBO_SDC3_Latched' },
+  { key: 'bms', label: 'BMS', raw: 'MOBO_BMS_Raw', debounced: 'MOBO_BMS_Debounced', latched: 'MOBO_BMS_Latched' },
+  { key: 'bspd', label: 'BSPD', raw: 'MOBO_BSPD_Raw', debounced: 'MOBO_BSPD_Debounced', latched: 'MOBO_BSPD_Latched' },
+  { key: 'imd', label: 'IMD', raw: 'MOBO_IMD_Raw', debounced: 'MOBO_IMD_Debounced', latched: 'MOBO_IMD_Latched' },
 ];
 
 const SYSTEM_STATES = {
@@ -270,7 +270,7 @@ function MoboDashboard({
       const next = maskFromSignals(relaySignals);
       return prev === next ? prev : next;
     });
-    const accActive = isBitSet(relaySignals.Acc_Fans_Active);
+    const accActive = isBitSet(relaySignals.MOBO_Acc_Fans_Active);
     if (accActive !== null) {
       setAccFansRequested((prev) => (prev === accActive ? prev : accActive));
     }
@@ -370,21 +370,21 @@ function MoboDashboard({
   const errors = getFrame('MOBO_Errors');
   const safety = getFrame('MOBO_Safety_Status');
   const canStats = getFrame('MOBO_CAN_Stats');
-  const systemState = getEnumDisplay(getSignal('System_State'), SYSTEM_STATES);
+  const systemState = getEnumDisplay(getSignal('MOBO_System_State'), SYSTEM_STATES);
   const heartbeatIsStale = isTimestampStale(heartbeat?.freshnessTimestamp, nowMs, staleTimeoutMs);
   const heartbeatStatus = !heartbeat ? 'Heartbeat missing' : heartbeatIsStale ? 'Heartbeat stale' : 'Heartbeat good';
   const heartbeatVariant = !heartbeat ? 'neutral' : heartbeatIsStale ? 'error' : 'success';
-  const errorFlagsValue = getNumeric(errors?.signals?.Error_Flags) ?? getNumeric(getSignal('Error_Summary'));
+  const errorFlagsValue = getNumeric(errors?.signals?.MOBO_Error_Flags) ?? getNumeric(getSignal('MOBO_Error_Summary'));
   const errorsClear = errorFlagsValue === 0;
   const errorHealthText = errorFlagsValue === null ? 'Errors unknown' : errorsClear ? 'Errors clear' : 'Errors active';
   const errorHealthVariant = errorFlagsValue === null ? 'neutral' : errorsClear ? 'success' : 'error';
-  const pumpOverrideActive = relayStatus?.signals?.Pump_Actual !== undefined
-    && relayStatus?.signals?.Pump_Commanded !== undefined
-    && isBitSet(relayStatus.signals.Pump_Actual)
-    && !isBitSet(relayStatus.signals.Pump_Commanded);
-  const accFansActiveBit = isBitSet(relayStatus?.signals?.Acc_Fans_Active);
+  const pumpOverrideActive = relayStatus?.signals?.MOBO_Pump_Actual !== undefined
+    && relayStatus?.signals?.MOBO_Pump_Commanded !== undefined
+    && isBitSet(relayStatus.signals.MOBO_Pump_Actual)
+    && !isBitSet(relayStatus.signals.MOBO_Pump_Commanded);
+  const accFansActiveBit = isBitSet(relayStatus?.signals?.MOBO_Acc_Fans_Active);
   const accFansActive = accFansActiveBit === true;
-  const accFansPhaseBit = isBitSet(relayStatus?.signals?.Acc_Fans_Phase);
+  const accFansPhaseBit = isBitSet(relayStatus?.signals?.MOBO_Acc_Fans_Phase);
   const accFansPhaseLabel = accFansPhaseBit === null
     ? '--'
     : accFansPhaseBit ? 'FANS' : 'DRS';
@@ -557,7 +557,7 @@ function MoboDashboard({
               <div className="mobo-heartbeat-summary">
                 <StatusPill value={heartbeatStatus} variant={heartbeatVariant} />
                 <StatusPill value={errorHealthText} variant={errorHealthVariant} />
-                <span>Fault count {getDisplay(getSignal('Fault_Count'))}</span>
+                <span>Fault count {getDisplay(getSignal('MOBO_Fault_Count'))}</span>
               </div>
             </section>
 
@@ -568,7 +568,7 @@ function MoboDashboard({
               </div>
               <div className="mobo-kpi-row">
                 <div className="mobo-kpi-value">{maskLabel(maskFromSignals(relayStatus?.signals))}</div>
-                <StatusPill value={`${getDisplay(getSignal('Ms_Since_Cmd'))} ms since command`} />
+                <StatusPill value={`${getDisplay(getSignal('MOBO_Ms_Since_Cmd'))} ms since command`} />
               </div>
               <div className="mobo-split-grid">
                 <div><span>Accepted Mask</span><strong>{maskLabel(maskFromSignals(relayStatus?.signals))}</strong></div>
@@ -582,10 +582,10 @@ function MoboDashboard({
                 {renderFreshness('MOBO_Power_Telemetry')}
               </div>
               <div className="mobo-split-grid">
-                <div><span>Battery</span><strong>{getDisplay(getSignal('Battery_Voltage'), '--', 3)}</strong></div>
-                <div><span>5V Rail</span><strong>{getDisplay(getSignal('FiveV_Sense'), '--', 3)}</strong></div>
-                <div><span>Rear Brake</span><strong>{getDisplay(getSignal('BSE_PSI_Rear'), '--', 1)}</strong></div>
-                <div><span>LV ADC</span><strong>{getDisplay(getSignal('LV_Current_Raw'))}</strong></div>
+                <div><span>Battery</span><strong>{getDisplay(getSignal('MOBO_Battery_Voltage'), '--', 3)}</strong></div>
+                <div><span>5V Rail</span><strong>{getDisplay(getSignal('MOBO_FiveV_Sense'), '--', 3)}</strong></div>
+                <div><span>Rear Brake</span><strong>{getDisplay(getSignal('MOBO_BSE_PSI_Rear'), '--', 1)}</strong></div>
+                <div><span>LV ADC</span><strong>{getDisplay(getSignal('MOBO_LV_Current_Raw'))}</strong></div>
               </div>
             </section>
 
@@ -595,10 +595,10 @@ function MoboDashboard({
                 {renderFreshness('MOBO_Current_Telemetry')}
               </div>
               <div className="mobo-split-grid">
-                <div><span>LV</span><strong>{getDisplay(getSignal('LV_Current'), '--', 3)}</strong></div>
-                <div><span>HC</span><strong>{getDisplay(getSignal('HC_Current'), '--', 3)}</strong></div>
-                <div><span>LV Peak</span><strong>{getDisplay(getSignal('LV_Current_Peak'), '--', 3)}</strong></div>
-                <div><span>HC Peak</span><strong>{getDisplay(getSignal('HC_Current_Peak'), '--', 3)}</strong></div>
+                <div><span>LV</span><strong>{getDisplay(getSignal('MOBO_LV_Current'), '--', 3)}</strong></div>
+                <div><span>HC</span><strong>{getDisplay(getSignal('MOBO_HC_Current'), '--', 3)}</strong></div>
+                <div><span>LV Peak</span><strong>{getDisplay(getSignal('MOBO_LV_Current_Peak'), '--', 3)}</strong></div>
+                <div><span>HC Peak</span><strong>{getDisplay(getSignal('MOBO_HC_Current_Peak'), '--', 3)}</strong></div>
               </div>
             </section>
           </div>
@@ -633,10 +633,10 @@ function MoboDashboard({
                 {renderFreshness('MOBO_Errors')}
               </div>
               <div className="mobo-split-grid">
-                <div><span>Summary</span><strong>{formatHex(getSignal('Error_Summary'))}</strong></div>
-                <div><span>Error Flags</span><strong>{formatHex(errors?.signals?.Error_Flags)}</strong></div>
-                <div><span>Warning Flags</span><strong>{formatHex(errors?.signals?.Warning_Flags)}</strong></div>
-                <div><span>Has Warnings</span><strong>{formatBool(getSignal('Has_Warnings'), 'YES', 'NO')}</strong></div>
+                <div><span>Summary</span><strong>{formatHex(getSignal('MOBO_Error_Summary'))}</strong></div>
+                <div><span>Error Flags</span><strong>{formatHex(errors?.signals?.MOBO_Error_Flags)}</strong></div>
+                <div><span>Warning Flags</span><strong>{formatHex(errors?.signals?.MOBO_Warning_Flags)}</strong></div>
+                <div><span>Has Warnings</span><strong>{formatBool(getSignal('MOBO_Has_Warnings'), 'YES', 'NO')}</strong></div>
               </div>
             </section>
 
@@ -646,10 +646,10 @@ function MoboDashboard({
                 {renderFreshness('MOBO_CAN_Stats')}
               </div>
               <div className="mobo-split-grid">
-                <div><span>TX Success</span><strong>{getDisplay(canStats?.signals?.TX_Success)}</strong></div>
-                <div><span>TX Failures</span><strong>{getDisplay(canStats?.signals?.TX_Failures)}</strong></div>
-                <div><span>RX Messages</span><strong>{getDisplay(canStats?.signals?.RX_Messages)}</strong></div>
-                <div><span>RX Drops</span><strong>{getDisplay(canStats?.signals?.RX_Drops)}</strong></div>
+                <div><span>TX Success</span><strong>{getDisplay(canStats?.signals?.MOBO_TX_Success)}</strong></div>
+                <div><span>TX Failures</span><strong>{getDisplay(canStats?.signals?.MOBO_TX_Failures)}</strong></div>
+                <div><span>RX Messages</span><strong>{getDisplay(canStats?.signals?.MOBO_RX_Messages)}</strong></div>
+                <div><span>RX Drops</span><strong>{getDisplay(canStats?.signals?.MOBO_RX_Drops)}</strong></div>
               </div>
             </section>
 

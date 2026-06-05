@@ -7,7 +7,7 @@ import './BalanceManager.css';
 const CAN_BALANCE_CMD_BASE = 0x08F00F05;
 const CAN_BALANCE_CFG_BASE = 0x08F00F07;
 
-const SEND_INTERVAL_MS = 4000;
+const SEND_INTERVAL_MS = 1000;
 
 function BalanceManager({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
   const nowMs = useNowTick(1000);
