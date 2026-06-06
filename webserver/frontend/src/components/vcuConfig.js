@@ -56,6 +56,7 @@ export const createDefaultVcuConfig = () => ({
   regenMinSpeedRpm: 0,
   regenMaxSocPct: 100,
   regenMaxAppsPct: 100,
+  regenRyderMu: 0,
   regenStrategy: 0,
   launchEnabled: false,
   launchEndRpm: 0,
@@ -110,6 +111,7 @@ export const getVcuConfigFromSignals = (getSignal) => ({
   regenMinSpeedRpm: getNumeric(getSignal('VCU_Regen_Min_Speed')) ?? 0,
   regenMaxSocPct: getNumeric(getSignal('VCU_Regen_Max_SOC')) ?? 100,
   regenMaxAppsPct: getNumeric(getSignal('VCU_Regen_Max_APPS')) ?? 100,
+  regenRyderMu: getNumeric(getSignal('VCU_Regen_Ryder_Mu')) ?? 0,
   regenStrategy: getNumeric(getSignal('VCU_Regen_Strategy')) ?? 0,
   launchEnabled: bitValue(getSignal('VCU_Launch_Enabled')) ?? false,
   launchEndRpm: getNumeric(getSignal('VCU_Launch_End_RPM')) ?? 0,
@@ -191,6 +193,7 @@ export const buildVcuConfigFrame = (mux, config) => {
   if (mux === 38) view.setUint16(1, Math.round(clampNumber(config.launchActualTorque4, 0, 230, 90)), true);
   if (mux === 39) bytes[1] = config.regenSocGateEnabled ? 1 : 0;
   if (mux === 40) view.setUint16(1, Math.round(clampNumber(config.regenMaxAppsPct, 0, 100, 100)), true);
+  if (mux === 41) view.setUint16(1, Math.round(clampNumber(config.regenRyderMu, 0, 10, 0) * 1000), true);
   if (mux === 240) view.setUint16(1, Math.round(clampNumber(config.trcCommand, 0, 9, 0)), true);
 
   return Array.from(bytes);

@@ -19,6 +19,15 @@
       "size": "medium"
     },
     {
+      "id": "w_mpxhxv9q_gk2u14",
+      "signal_name": "VCU_BSE_PSI",
+      "source_dbc": "VCU.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
+    },
+    {
       "id": "w_mpz23t5u_2xb4ph",
       "signal_name": "HVC_Current_High_mA",
       "source_dbc": "hvc.dbc",
@@ -57,15 +66,6 @@
     {
       "id": "w_mpxhv7et_x49tnf",
       "signal_name": "VCU_State",
-      "source_dbc": "VCU.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mpxhxv9q_gk2u14",
-      "signal_name": "VCU_BSE_PSI",
       "source_dbc": "VCU.dbc",
       "label": null,
       "display_type": "auto",
@@ -193,6 +193,33 @@
       "id": "w_mpz4xdm6_ibnfsx",
       "signal_name": "Speed",
       "source_dbc": "can9-database-01.09.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
+    },
+    {
+      "id": "w_mq0jidyl_u240k8",
+      "signal_name": "VCU_Regen_Block_Reason",
+      "source_dbc": "VCU.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
+    },
+    {
+      "id": "w_mq0jj3h2_1catpq",
+      "signal_name": "VCU_APPS_Value",
+      "source_dbc": "VCU.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
+    },
+    {
+      "id": "w_mq0l26ir_pdonvb",
+      "signal_name": "HVC_Batt_Voltage_mV",
+      "source_dbc": "hvc.dbc",
       "label": null,
       "display_type": "auto",
       "decimals": null,

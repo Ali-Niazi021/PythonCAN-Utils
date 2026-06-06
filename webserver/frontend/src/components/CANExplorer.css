@@ -338,6 +338,18 @@
   text-align: center;
 }
 
+.sidebar-event-flag-section {
+  border-color: rgba(220, 38, 38, 0.35);
+  background: linear-gradient(180deg, rgba(220, 38, 38, 0.08) 0%, rgba(20, 20, 20, 0.95) 100%);
+}
+
+.event-flag-hint {
+  margin-top: 10px;
+  color: #a3a3a3;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 /* Tab Navigation in Sidebar */
 .sidebar-tabs {
   display: flex;

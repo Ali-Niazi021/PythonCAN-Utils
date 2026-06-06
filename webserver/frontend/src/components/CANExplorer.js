@@ -4,6 +4,10 @@ import TransmitList from './TransmitList';
 import './CANExplorer.css';
 
 const BUS_IDS = ['bus1', 'bus2'];
+const VCU_LOG_EVENT_FLAG_CAN_ID = 2366639360;
+const VCU_LOG_EVENT_FLAG_DATA = [1, 0, 0, 0, 0, 0, 0, 0];
+const VCU_LOG_EVENT_FLAG_INTERVAL_MS = 10;
+const VCU_LOG_EVENT_FLAG_DURATION_MS = 1000;
 
 const getPreferredSocketCanInterface = (busId) => (busId === 'bus2' ? 'can1' : 'can0');
 
@@ -121,6 +125,10 @@ function CANExplorer({
     bus2: createInitialConnectionDraft('bus2'),
   }));
   const [selectedTransmitBusId, setSelectedTransmitBusId] = useState(() => readStoredValue('selectedTransmitBusId', 'bus1'));
+  const [eventFlagStatus, setEventFlagStatus] = useState(null);
+  const [eventFlagBurstActive, setEventFlagBurstActive] = useState(false);
+  const eventFlagIntervalRef = useRef(null);
+  const eventFlagTimeoutRef = useRef(null);
 
   // Keep the local stale-timeout input in sync if the underlying value changes elsewhere.
   useEffect(() => {
@@ -244,6 +252,92 @@ function CANExplorer({
     }, {});
   }, [connectionStatus]);
 
+  const connectedBusIds = useMemo(
+    () => BUS_IDS.filter((busId) => Boolean(busStatusMap[busId]?.connected)),
+    [busStatusMap]
+  );
+
+  const stopEventFlagBurst = useCallback((status = null) => {
+    if (eventFlagIntervalRef.current) {
+      clearInterval(eventFlagIntervalRef.current);
+      eventFlagIntervalRef.current = null;
+    }
+    if (eventFlagTimeoutRef.current) {
+      clearTimeout(eventFlagTimeoutRef.current);
+      eventFlagTimeoutRef.current = null;
+    }
+    setEventFlagBurstActive(false);
+    setEventFlagStatus(status);
+  }, []);
+
+  const handleTriggerEventFlag = useCallback(async () => {
+    if (!onSendMessage || eventFlagBurstActive) {
+      return;
+    }
+
+    const targetBusId = connectedBusIds.includes(selectedTransmitBusId)
+      ? selectedTransmitBusId
+      : connectedBusIds[0] || null;
+
+    if (!targetBusId) {
+      setEventFlagStatus({
+        type: 'error',
+        text: 'Connect a bus before sending the event flag.',
+      });
+      return;
+    }
+
+    setEventFlagStatus({
+      type: 'success',
+      text: `Sending 0x${VCU_LOG_EVENT_FLAG_CAN_ID.toString(16).toUpperCase()} on ${getBusLabel(targetBusId)} for 1s.`,
+    });
+    setEventFlagBurstActive(true);
+
+    const sendEventFlag = async () => {
+      const ok = await onSendMessage(
+        VCU_LOG_EVENT_FLAG_CAN_ID,
+        VCU_LOG_EVENT_FLAG_DATA,
+        true,
+        false,
+        targetBusId
+      );
+
+      if (!ok) {
+        stopEventFlagBurst({
+          type: 'error',
+          text: 'Failed to send the VCU event flag burst.',
+        });
+      }
+    };
+
+    const firstSendOk = await onSendMessage(
+      VCU_LOG_EVENT_FLAG_CAN_ID,
+      VCU_LOG_EVENT_FLAG_DATA,
+      true,
+      false,
+      targetBusId
+    );
+
+    if (!firstSendOk) {
+      stopEventFlagBurst({
+        type: 'error',
+        text: 'Failed to send the VCU event flag burst.',
+      });
+      return;
+    }
+
+    eventFlagIntervalRef.current = setInterval(() => {
+      sendEventFlag();
+    }, VCU_LOG_EVENT_FLAG_INTERVAL_MS);
+
+    eventFlagTimeoutRef.current = setTimeout(() => {
+      stopEventFlagBurst({
+        type: 'success',
+        text: `Event flag burst finished on ${getBusLabel(targetBusId)}.`,
+      });
+    }, VCU_LOG_EVENT_FLAG_DURATION_MS);
+  }, [connectedBusIds, eventFlagBurstActive, onSendMessage, selectedTransmitBusId, stopEventFlagBurst]);
+
   const busStatsMap = useMemo(() => {
     const statEntries = Array.isArray(stats?.buses) ? stats.buses : [];
     return BUS_IDS.reduce((accumulator, busId) => {
@@ -256,11 +350,6 @@ function CANExplorer({
       return accumulator;
     }, {});
   }, [stats]);
-
-  const connectedBusIds = useMemo(
-    () => BUS_IDS.filter((busId) => Boolean(busStatusMap[busId]?.connected)),
-    [busStatusMap]
-  );
 
   useEffect(() => {
     if (connectedBusIds.length === 0) {
@@ -275,6 +364,10 @@ function CANExplorer({
   useEffect(() => {
     localStorage.setItem('selectedTransmitBusId', selectedTransmitBusId);
   }, [selectedTransmitBusId]);
+
+  useEffect(() => () => {
+    stopEventFlagBurst();
+  }, [stopEventFlagBurst]);
 
   const updateConnectionDraft = useCallback((busId, patch) => {
     setConnectionDrafts((previousDrafts) => ({
@@ -1212,6 +1305,30 @@ function CANExplorer({
               <span className="app-subtitle">TREV4 CAN Viewer</span>
             </div>
           </div>
+        </div>
+
+        <div className="sidebar-section sidebar-event-flag-section">
+          <div className="sidebar-header">
+            <Flag size={18} />
+            <span>Event Flag</span>
+          </div>
+          <button
+            className={`btn btn-block ${eventFlagBurstActive ? 'btn-warning' : 'btn-primary'}`}
+            onClick={handleTriggerEventFlag}
+            disabled={!onSendMessage || connectedBusIds.length === 0 || eventFlagBurstActive}
+            title="Send the VCU event flag frame every 10ms for 1 second"
+          >
+            <Flag size={16} />
+            {eventFlagBurstActive ? 'Sending Event Flag...' : 'Flag Event In Logs'}
+          </button>
+          <div className="event-flag-hint">
+            Sends VCU_LOG_Event_Flag on the selected transmit bus at 10 ms for 1 second.
+          </div>
+          {eventFlagStatus && (
+            <div className={`sidebar-status ${eventFlagStatus.type === 'success' ? 'success' : ''}`}>
+              {eventFlagStatus.text}
+            </div>
+          )}
         </div>
 
         {/* Tab Navigation */}
