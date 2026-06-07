@@ -3,6 +3,8 @@
   color: #e5e7eb;
   background: #0d0d0d;
   min-height: 100%;
+  height: 100%;
+  overflow-y: auto;
 }
 
 .driving-header {
@@ -209,7 +211,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
 }
 
 .driving-card-label {
@@ -220,6 +222,8 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
 }
 
 .driving-card-tools {
@@ -374,3 +378,268 @@
 
 .driving-card-config input:focus,
 .driving-card-config select:focus { border-color: #22c55e; }
+
+/* ──────────────────────────────────────────────────────
+   Drag and drop
+   ────────────────────────────────────────────────────── */
+.driving-card.draggable {
+  cursor: grab;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+
+.driving-card.draggable:active {
+  cursor: grabbing;
+}
+
+.driving-card.draggable:hover {
+  border-color: #3a3a3a;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+}
+
+.driving-card.dragging {
+  opacity: 0.4;
+  transform: scale(0.97);
+}
+
+.driving-drag-handle {
+  color: #4b5563;
+  cursor: grab;
+  flex-shrink: 0;
+}
+
+.driving-drag-handle:active {
+  cursor: grabbing;
+}
+
+/* ──────────────────────────────────────────────────────
+   Cluster sections
+   ────────────────────────────────────────────────────── */
+.cluster-section {
+  margin-bottom: 20px;
+  background: rgba(17, 17, 17, 0.5);
+  border: 1px solid #1f1f1f;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.cluster-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #141414;
+  border-bottom: 1px solid #1f1f1f;
+  user-select: none;
+}
+
+.cluster-collapse-btn {
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border-radius: 4px;
+}
+
+.cluster-collapse-btn:hover {
+  color: #e5e7eb;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.cluster-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #86efac;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cluster-rename-input {
+  flex: 1;
+  background: #1a1a1a;
+  border: 1px solid #22c55e;
+  color: #e5e7eb;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 14px;
+  font-weight: 600;
+  outline: none;
+  min-width: 0;
+}
+
+.cluster-tools {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.cluster-tool-btn {
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  color: #9ca3af;
+  border-radius: 6px;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.cluster-tool-btn:hover:not(.danger) {
+  border-color: #3a3a3a;
+  color: #e5e7eb;
+}
+
+.cluster-tool-btn.danger:hover {
+  border-color: #ef4444;
+  color: #fca5a5;
+}
+
+.cluster-widgets {
+  padding: 14px;
+}
+
+.cluster-drop-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: #4b5563;
+  font-size: 13px;
+  font-style: italic;
+  border: 1px dashed #2a2a2a;
+  border-radius: 8px;
+  min-height: 60px;
+}
+
+.cluster-section.collapsed .cluster-header {
+  border-bottom: none;
+}
+
+/* ──────────────────────────────────────────────────────
+   Create cluster bar
+   ────────────────────────────────────────────────────── */
+.cluster-create-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #111;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+  padding: 8px 12px;
+  margin-bottom: 16px;
+  color: #9ca3af;
+}
+
+.cluster-create-bar input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #e5e7eb;
+  font-size: 13px;
+  min-width: 0;
+}
+
+.cluster-create-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #14532d;
+  border: 1px solid #22c55e;
+  color: #bbf7d0;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.cluster-create-btn:hover:not(:disabled) {
+  background: #166534;
+}
+
+.cluster-create-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ──────────────────────────────────────────────────────
+   Ungrouped section
+   ────────────────────────────────────────────────────── */
+.ungrouped-section {
+  margin-top: 4px;
+}
+
+.ungrouped-label {
+  font-size: 12px;
+  color: #4b5563;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+  padding-left: 2px;
+}
+
+/* ──────────────────────────────────────────────────────
+   Assign widget overlay
+   ────────────────────────────────────────────────────── */
+.assign-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.assign-panel {
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  padding: 16px;
+  min-width: 220px;
+  max-width: 320px;
+}
+
+.assign-panel h4 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  color: #e5e7eb;
+}
+
+.assign-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #1f1f1f;
+  color: #e5e7eb;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.assign-option:last-child {
+  border-bottom: none;
+}
+
+.assign-option:hover {
+  background: #222;
+}

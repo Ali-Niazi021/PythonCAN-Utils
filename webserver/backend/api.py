@@ -294,17 +294,27 @@ class DrivingWidgetConfig(BaseModel):
     display_type: str = 'auto'  # 'auto' | 'number' | 'gauge' | 'boolean' | 'enum'
     decimals: Optional[int] = None  # Decimal places for numeric display
     size: str = 'medium'  # 'small' | 'medium' | 'large'
+    cluster_id: Optional[str] = None  # Group cluster this widget belongs to
+
+
+class DrivingClusterConfig(BaseModel):
+    """A named group of widgets on the Driving dashboard."""
+    id: str
+    name: str  # User-visible cluster name (e.g. "Battery", "Inverter")
+    collapsed: bool = False  # Whether the cluster is visually collapsed
 
 
 class DrivingDashboardConfigRequest(BaseModel):
     """Request to persist the Driving dashboard layout."""
     widgets: List[DrivingWidgetConfig] = []
+    clusters: List[DrivingClusterConfig] = []
 
 
 class DrivingDashboardConfigResponse(BaseModel):
     """Response containing the persisted Driving dashboard layout."""
     success: bool
     widgets: List[DrivingWidgetConfig] = []
+    clusters: List[DrivingClusterConfig] = []
 
 
 class DBCMessageInfo(BaseModel):
@@ -3415,13 +3425,14 @@ async def get_driving_dashboard_config():
     """Load the persisted Driving dashboard widget layout."""
     try:
         if not DRIVING_DASHBOARD_CONFIG_FILE.exists():
-            return DrivingDashboardConfigResponse(success=True, widgets=[])
+            return DrivingDashboardConfigResponse(success=True, widgets=[], clusters=[])
 
         with open(DRIVING_DASHBOARD_CONFIG_FILE, 'r') as f:
             data = json.load(f)
 
         widgets = [DrivingWidgetConfig(**w) for w in data.get("widgets", [])]
-        return DrivingDashboardConfigResponse(success=True, widgets=widgets)
+        clusters = [DrivingClusterConfig(**c) for c in data.get("clusters", [])]
+        return DrivingDashboardConfigResponse(success=True, widgets=widgets, clusters=clusters)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load driving dashboard config: {str(e)}")
 
@@ -3431,10 +3442,11 @@ async def save_driving_dashboard_config(request: DrivingDashboardConfigRequest):
     """Persist the Driving dashboard widget layout to a local JSON file."""
     try:
         widgets_data = [widget.dict() for widget in request.widgets]
+        clusters_data = [cluster.dict() for cluster in request.clusters]
         with open(DRIVING_DASHBOARD_CONFIG_FILE, 'w') as f:
-            json.dump({"widgets": widgets_data}, f, indent=2)
+            json.dump({"widgets": widgets_data, "clusters": clusters_data}, f, indent=2)
 
-        return DrivingDashboardConfigResponse(success=True, widgets=request.widgets)
+        return DrivingDashboardConfigResponse(success=True, widgets=request.widgets, clusters=request.clusters)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save driving dashboard config: {str(e)}")
 

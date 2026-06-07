@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ChevronDown, ChevronUp, Gauge, Plus, Search, Settings, Trash2, X,
+  ChevronDown, ChevronUp, Gauge, GripVertical, Layers, Pencil, Plus,
+  Search, Settings, Trash2, X,
 } from 'lucide-react';
 import { apiService } from '../services/api';
 import {
@@ -25,29 +26,30 @@ const SIZE_OPTIONS = [
 const MAX_PICKER_RESULTS = 40;
 const LOCAL_STORAGE_KEY = 'drivingDashboardConfig';
 
-function readLocalWidgets() {
+function readLocalConfig() {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (!raw) return [];
+    if (!raw) return { widgets: [], clusters: [] };
     const data = JSON.parse(raw);
-    return Array.isArray(data?.widgets) ? data.widgets : [];
+    return {
+      widgets: Array.isArray(data?.widgets) ? data.widgets : [],
+      clusters: Array.isArray(data?.clusters) ? data.clusters : [],
+    };
   } catch (err) {
     console.warn('Failed to read local driving dashboard config:', err);
-    return [];
+    return { widgets: [], clusters: [] };
   }
 }
 
-function writeLocalWidgets(widgets) {
-  localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify({ widgets }));
+function writeLocalConfig(widgets, clusters) {
+  localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify({ widgets, clusters }));
 }
 
-function makeWidgetId() {
-  return `w_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+function makeId(prefix) {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-// Pull the numeric component out of a decoded signal payload. Signals may be a
-// bare number/string or a { value, raw, unit } object. Enum signals expose the
-// numeric code under `raw` while `value` holds the label string.
+// Pull the numeric component out of a decoded signal payload.
 function getNumericValue(sig) {
   if (sig == null) return null;
   if (typeof sig === 'number') return sig;
@@ -73,7 +75,6 @@ function getUnit(sig, meta) {
   return '';
 }
 
-// Decide how to render a widget when its display type is left on "auto".
 function resolveDisplayType(widget, meta) {
   if (widget.display_type && widget.display_type !== 'auto') return widget.display_type;
   if (meta) {
@@ -95,34 +96,274 @@ function formatNumber(value, decimals) {
   return value.toFixed(decimals);
 }
 
+/* ──────────────────────────────────────────────────────
+   Cluster header bar (rename, collapse, delete)
+   ────────────────────────────────────────────────────── */
+function ClusterHeader({ cluster, editMode, onRename, onToggleCollapse, onDelete }) {
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState(cluster.name);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (renaming && inputRef.current) inputRef.current.focus();
+  }, [renaming]);
+
+  const commitRename = () => {
+    const trimmed = nameDraft.trim();
+    if (trimmed && trimmed !== cluster.name) onRename(cluster.id, trimmed);
+    setRenaming(false);
+  };
+
+  return (
+    <div className="cluster-header" onDragOver={(e) => e.preventDefault()}>
+      <button
+        type="button"
+        className="cluster-collapse-btn"
+        onClick={() => onToggleCollapse(cluster.id)}
+        title={cluster.collapsed ? 'Expand' : 'Collapse'}
+      >
+        {cluster.collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+      </button>
+
+      {renaming ? (
+        <input
+          ref={inputRef}
+          className="cluster-rename-input"
+          value={nameDraft}
+          onChange={(e) => setNameDraft(e.target.value)}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commitRename();
+            if (e.key === 'Escape') { setRenaming(false); setNameDraft(cluster.name); }
+          }}
+        />
+      ) : (
+        <span className="cluster-name">
+          <Layers size={14} />
+          {cluster.name}
+        </span>
+      )}
+
+      {editMode && (
+        <div className="cluster-tools">
+          {!renaming && (
+            <button
+              type="button"
+              className="cluster-tool-btn"
+              onClick={() => { setNameDraft(cluster.name); setRenaming(true); }}
+              title="Rename cluster"
+            >
+              <Pencil size={13} />
+            </button>
+          )}
+          <button
+            type="button"
+            className="cluster-tool-btn danger"
+            onClick={() => onDelete(cluster.id)}
+            title="Delete cluster (widgets move to ungrouped)"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────
+   Draggable widget card
+   ────────────────────────────────────────────────────── */
+function DraggableWidgetCard({
+  widget, index, clusterId, editMode, catalog, latestSignals, nowMs, staleTimeoutMs,
+  onRemove, onPatch, onDragStart, onDragOver, onDragEnd, onDrop,
+}) {
+  const metaEntry = useMemo(() => {
+    const entries = catalog.get(widget.signal_name);
+    if (!entries || entries.length === 0) return null;
+    if (widget.source_dbc) {
+      const match = entries.find((e) => e.sourceDbc === widget.source_dbc);
+      if (match) return match;
+    }
+    return entries[0];
+  }, [catalog, widget.signal_name, widget.source_dbc]);
+
+  const meta = metaEntry?.meta || null;
+  const live = latestSignals.get(widget.signal_name);
+  const sig = live?.sig;
+  const stale = live ? isTimestampStale(live.ts, nowMs, staleTimeoutMs) : false;
+  const hasData = !!live;
+  const type = resolveDisplayType(widget, meta);
+  const label = widget.label || widget.signal_name;
+  const numeric = getNumericValue(sig);
+
+  return (
+    <div
+      className={`driving-card size-${widget.size || 'medium'} ${stale ? 'stale' : ''} ${!hasData ? 'no-data' : ''} ${editMode ? 'draggable' : ''}`}
+      draggable={editMode}
+      onDragStart={(e) => onDragStart(e, widget.id, clusterId, index)}
+      onDragOver={(e) => onDragOver(e, clusterId, index)}
+      onDragEnd={onDragEnd}
+      onDrop={(e) => onDrop(e, clusterId, index)}
+    >
+      <div className="driving-card-head">
+        {editMode && (
+          <GripVertical size={14} className="driving-drag-handle" />
+        )}
+        <span className="driving-card-label" title={widget.signal_name}>{label}</span>
+        {editMode && (
+          <div className="driving-card-tools">
+            <button type="button" className="danger" onClick={() => onRemove(widget.id)} title="Remove">
+              <Trash2 size={14} />
+            </button>
+          </div>
+        )}
+      </div>
+
+      <WidgetValue
+        type={type}
+        sig={sig}
+        meta={meta}
+        numeric={numeric}
+        decimals={widget.decimals}
+        hasData={hasData}
+      />
+
+      {!editMode && (
+        <div className="driving-card-foot">
+          <span className="driving-card-source">
+            {live?.messageName || metaEntry?.messageName || '—'}
+          </span>
+          {stale && <span className="driving-card-stale">stale</span>}
+        </div>
+      )}
+
+      {editMode && (
+        <WidgetConfigPanel
+          widget={widget}
+          type={type}
+          catalog={catalog}
+          onPatch={onPatch}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────
+   Widget configuration panel (shown in edit mode)
+   ────────────────────────────────────────────────────── */
+function WidgetConfigPanel({ widget, type, catalog, onPatch }) {
+  return (
+    <div className="driving-card-config">
+      <label>
+        Label
+        <input
+          type="text"
+          value={widget.label || ''}
+          placeholder={widget.signal_name}
+          onChange={(e) => onPatch(widget.id, { label: e.target.value || null })}
+        />
+      </label>
+      <div className="driving-config-row">
+        <label>
+          Display
+          <select
+            value={widget.display_type || 'auto'}
+            onChange={(e) => onPatch(widget.id, { display_type: e.target.value })}
+          >
+            {DISPLAY_TYPES.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Size
+          <select
+            value={widget.size || 'medium'}
+            onChange={(e) => onPatch(widget.id, { size: e.target.value })}
+          >
+            {SIZE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {(type === 'number' || type === 'gauge') && (
+        <label>
+          Decimals
+          <input
+            type="number"
+            min="0"
+            max="6"
+            value={widget.decimals == null ? '' : widget.decimals}
+            placeholder="auto"
+            onChange={(e) => {
+              const v = e.target.value;
+              onPatch(widget.id, { decimals: v === '' ? null : Math.max(0, Math.min(6, parseInt(v, 10) || 0)) });
+            }}
+          />
+        </label>
+      )}
+      {catalog.get(widget.signal_name)?.length > 1 && (
+        <label>
+          DBC source
+          <select
+            value={widget.source_dbc || ''}
+            onChange={(e) => onPatch(widget.id, { source_dbc: e.target.value || null })}
+          >
+            {catalog.get(widget.signal_name).map((entry) => (
+              <option key={`${entry.sourceDbc}_${entry.messageName}`} value={entry.sourceDbc || ''}>
+                {entry.sourceDbc || 'unknown'} · {entry.messageName}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────
+   Main DrivingDashboard component
+   ────────────────────────────────────────────────────── */
 function DrivingDashboard({ messages = [], dbcFiles = [], staleTimeoutMs = 30000 }) {
   const [widgets, setWidgets] = useState([]);
+  const [clusters, setClusters] = useState([]);
   const [catalog, setCatalog] = useState(new Map());
   const [loadingCatalog, setLoadingCatalog] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [editMode, setEditMode] = useState(false);
   const [pickerQuery, setPickerQuery] = useState('');
-  const [saveStatus, setSaveStatus] = useState('idle'); // idle | saving | saved | saved-local | error
+  const [saveStatus, setSaveStatus] = useState('idle');
+  const [newClusterName, setNewClusterName] = useState('');
+  const [assignTarget, setAssignTarget] = useState(null); // widgetId → clusterId being chosen
 
   const nowMs = useNowTick(1000);
   const saveTimerRef = useRef(null);
   const initialisedRef = useRef(false);
+  const dragRef = useRef(null); // { widgetId, fromClusterId, fromIndex }
 
   const enabledDbcCount = dbcFiles.filter((f) => f.enabled).length;
 
-  // Load persisted layout and the signal catalog on mount.
+  /* ── Load persisted layout and signal catalog ── */
   useEffect(() => {
     let cancelled = false;
 
     async function loadConfig() {
-      const localWidgets = readLocalWidgets();
+      const local = readLocalConfig();
       try {
         const data = await apiService.getDrivingDashboardConfig();
-        if (!cancelled && Array.isArray(data?.widgets)) {
-          setWidgets(data.widgets.length > 0 ? data.widgets : localWidgets);
+        if (!cancelled) {
+          const w = Array.isArray(data?.widgets) ? data.widgets : [];
+          const c = Array.isArray(data?.clusters) ? data.clusters : [];
+          setWidgets(w.length > 0 ? w : local.widgets);
+          setClusters(c.length > 0 || w.length > 0 ? c : local.clusters);
         }
       } catch (err) {
-        if (!cancelled) setWidgets(localWidgets);
+        if (!cancelled) {
+          setWidgets(local.widgets);
+          setClusters(local.clusters);
+        }
         console.warn('Failed to load driving dashboard config:', err);
       } finally {
         if (!cancelled) initialisedRef.current = true;
@@ -162,13 +403,13 @@ function DrivingDashboard({ messages = [], dbcFiles = [], staleTimeoutMs = 30000
     loadCatalog();
   }, [loadCatalog, enabledDbcCount]);
 
-  // Persist layout changes (debounced) once the initial config has loaded.
-  const persist = useCallback((nextWidgets) => {
+  /* ── Persist layout (debounced) ── */
+  const persist = useCallback((nextWidgets, nextClusters) => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     setSaveStatus('saving');
     let savedLocally = false;
     try {
-      writeLocalWidgets(nextWidgets);
+      writeLocalConfig(nextWidgets, nextClusters);
       savedLocally = true;
     } catch (err) {
       console.error('Failed to save local driving dashboard config:', err);
@@ -176,7 +417,7 @@ function DrivingDashboard({ messages = [], dbcFiles = [], staleTimeoutMs = 30000
 
     saveTimerRef.current = setTimeout(async () => {
       try {
-        await apiService.saveDrivingDashboardConfig(nextWidgets);
+        await apiService.saveDrivingDashboardConfig(nextWidgets, nextClusters);
         setSaveStatus('saved');
       } catch (err) {
         if (savedLocally) {
@@ -193,16 +434,24 @@ function DrivingDashboard({ messages = [], dbcFiles = [], staleTimeoutMs = 30000
   const updateWidgets = useCallback((updater) => {
     setWidgets((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
-      if (initialisedRef.current) persist(next);
+      if (initialisedRef.current) persist(next, clusters);
       return next;
     });
-  }, [persist]);
+  }, [persist, clusters]);
+
+  const updateClusters = useCallback((updater) => {
+    setClusters((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      if (initialisedRef.current) persist(widgets, next);
+      return next;
+    });
+  }, [persist, widgets]);
 
   useEffect(() => () => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
   }, []);
 
-  // Latest decoded value per signal name across all buses/DBCs.
+  /* ── Latest decoded signals ── */
   const latestSignals = useMemo(() => {
     const map = new Map();
     messages.forEach((msg) => {
@@ -225,27 +474,63 @@ function DrivingDashboard({ messages = [], dbcFiles = [], staleTimeoutMs = 30000
     return map;
   }, [messages]);
 
-  const getMetaFor = useCallback((signalName, sourceDbc) => {
-    const entries = catalog.get(signalName);
-    if (!entries || entries.length === 0) return null;
-    if (sourceDbc) {
-      const match = entries.find((e) => e.sourceDbc === sourceDbc);
-      if (match) return match;
-    }
-    return entries[0];
-  }, [catalog]);
+  /* ── Cluster helpers ── */
+  const ungroupedWidgets = useMemo(
+    () => widgets.filter((w) => !w.cluster_id),
+    [widgets],
+  );
 
+  const widgetsByCluster = useMemo(() => {
+    const map = {};
+    clusters.forEach((c) => { map[c.id] = []; });
+    widgets.forEach((w) => {
+      if (w.cluster_id && map[w.cluster_id]) {
+        map[w.cluster_id].push(w);
+      }
+    });
+    return map;
+  }, [widgets, clusters]);
+
+  const addCluster = useCallback(() => {
+    const name = newClusterName.trim();
+    if (!name) return;
+    const cluster = { id: makeId('cl'), name, collapsed: false };
+    updateClusters((prev) => [...prev, cluster]);
+    setNewClusterName('');
+  }, [newClusterName, updateClusters]);
+
+  const renameCluster = useCallback((clusterId, newName) => {
+    updateClusters((prev) => prev.map((c) => (c.id === clusterId ? { ...c, name: newName } : c)));
+  }, [updateClusters]);
+
+  const toggleClusterCollapse = useCallback((clusterId) => {
+    updateClusters((prev) => prev.map((c) => (c.id === clusterId ? { ...c, collapsed: !c.collapsed } : c)));
+  }, [updateClusters]);
+
+  const deleteCluster = useCallback((clusterId) => {
+    // Move all widgets in this cluster to ungrouped
+    updateWidgets((prev) => prev.map((w) => (w.cluster_id === clusterId ? { ...w, cluster_id: null } : w)));
+    updateClusters((prev) => prev.filter((c) => c.id !== clusterId));
+  }, [updateWidgets, updateClusters]);
+
+  const assignWidgetToCluster = useCallback((widgetId, clusterId) => {
+    updateWidgets((prev) => prev.map((w) => (w.id === widgetId ? { ...w, cluster_id: clusterId || null } : w)));
+    setAssignTarget(null);
+  }, [updateWidgets]);
+
+  /* ── Widget CRUD ── */
   const addWidget = useCallback((signalName, sourceDbc) => {
     updateWidgets((prev) => [
       ...prev,
       {
-        id: makeWidgetId(),
+        id: makeId('w'),
         signal_name: signalName,
         source_dbc: sourceDbc || null,
         label: null,
         display_type: 'auto',
         decimals: null,
         size: 'medium',
+        cluster_id: null,
       },
     ]);
     setPickerQuery('');
@@ -259,19 +544,128 @@ function DrivingDashboard({ messages = [], dbcFiles = [], staleTimeoutMs = 30000
     updateWidgets((prev) => prev.map((w) => (w.id === id ? { ...w, ...patch } : w)));
   }, [updateWidgets]);
 
-  const moveWidget = useCallback((id, direction) => {
-    updateWidgets((prev) => {
-      const index = prev.findIndex((w) => w.id === id);
-      if (index < 0) return prev;
-      const target = index + direction;
-      if (target < 0 || target >= prev.length) return prev;
-      const next = [...prev];
-      [next[index], next[target]] = [next[target], next[index]];
-      return next;
-    });
-  }, [updateWidgets]);
+  /* ── Drag and drop ── */
+  const handleDragStart = useCallback((e, widgetId, fromClusterId, fromIndex) => {
+    dragRef.current = { widgetId, fromClusterId, fromIndex };
+    e.dataTransfer.effectAllowed = 'move';
+    // Make the drag image slightly translucent
+    if (e.currentTarget) {
+      e.currentTarget.classList.add('dragging');
+    }
+  }, []);
 
-  // Signal-name picker results (bus independent).
+  const handleDragOver = useCallback((e, toClusterId, toIndex) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  const handleDragEnd = useCallback((e) => {
+    if (e.currentTarget) {
+      e.currentTarget.classList.remove('dragging');
+    }
+    dragRef.current = null;
+  }, []);
+
+  const handleDrop = useCallback((e, toClusterId, toIndex) => {
+    e.preventDefault();
+    const drag = dragRef.current;
+    if (!drag) return;
+    dragRef.current = null;
+
+    const { widgetId, fromClusterId } = drag;
+    // Don't drop on self
+    if (fromClusterId === toClusterId && drag.fromIndex === toIndex) return;
+
+    setWidgets((prevWidgets) => {
+      const widget = prevWidgets.find((w) => w.id === widgetId);
+      if (!widget) return prevWidgets;
+
+      // Build ordered list of widgets grouped the same way the render shows them:
+      // clusters in order, then ungrouped at the bottom.
+      // We'll work with the flat array but track which cluster each belongs to.
+
+      // Remove the widget from its current position
+      const without = prevWidgets.filter((w) => w.id !== widgetId);
+
+      // Update the cluster assignment if moving between clusters
+      const movedWidget = {
+        ...widget,
+        cluster_id: toClusterId || null,
+      };
+
+      // Rebuild the full ordered list maintaining the render order:
+      // cluster 0 widgets, cluster 1 widgets, ..., ungrouped widgets
+      const clusterOrder = clusters.map((c) => c.id);
+      // null at end = ungrouped
+      const getOrder = (w) => {
+        const cid = w.cluster_id || null;
+        if (cid === null) return clusterOrder.length; // ungrouped last
+        const idx = clusterOrder.indexOf(cid);
+        return idx >= 0 ? idx : clusterOrder.length;
+      };
+
+      // Partition remaining widgets by cluster
+      const byCluster = {};
+      without.forEach((w) => {
+        const key = w.cluster_id || '__ungrouped__';
+        if (!byCluster[key]) byCluster[key] = [];
+        byCluster[key].push(w);
+      });
+
+      // Insert moved widget at the target position in the target cluster
+      const targetKey = toClusterId || '__ungrouped__';
+      if (!byCluster[targetKey]) byCluster[targetKey] = [];
+      const insertIdx = Math.min(toIndex, byCluster[targetKey].length);
+      byCluster[targetKey].splice(insertIdx, 0, movedWidget);
+
+      // Reassemble in render order
+      const result = [];
+      clusterOrder.forEach((cid) => {
+        if (byCluster[cid]) result.push(...byCluster[cid]);
+      });
+      if (byCluster['__ungrouped__']) result.push(...byCluster['__ungrouped__']);
+
+      return result;
+    });
+  }, [clusters]);
+
+  // Drop handler for dropping onto a cluster header (appends to end of cluster)
+  const handleClusterHeaderDrop = useCallback((e, clusterId) => {
+    e.preventDefault();
+    const drag = dragRef.current;
+    if (!drag) return;
+
+    const { widgetId } = drag;
+    dragRef.current = null;
+
+    setWidgets((prevWidgets) => {
+      const widget = prevWidgets.find((w) => w.id === widgetId);
+      if (!widget) return prevWidgets;
+      if (widget.cluster_id === clusterId) return prevWidgets; // already in this cluster
+
+      return prevWidgets.map((w) => (w.id === widgetId ? { ...w, cluster_id: clusterId } : w));
+    });
+  }, []);
+
+  // Drop handler for dropping into ungrouped area
+  const handleUngroupedDrop = useCallback((e) => {
+    e.preventDefault();
+    const drag = dragRef.current;
+    if (!drag) return;
+
+    const { widgetId, fromClusterId, fromIndex } = drag;
+    dragRef.current = null;
+
+    if (!fromClusterId) return; // already ungrouped
+
+    setWidgets((prevWidgets) => {
+      const widget = prevWidgets.find((w) => w.id === widgetId);
+      if (!widget) return prevWidgets;
+      return prevWidgets.map((w) => (w.id === widgetId ? { ...w, cluster_id: null } : w));
+    });
+  }, []);
+
+  /* ── Signal picker ── */
   const pickerResults = useMemo(() => {
     const query = pickerQuery.trim().toLowerCase();
     const names = Array.from(catalog.keys()).sort((a, b) => a.localeCompare(b));
@@ -291,6 +685,53 @@ function DrivingDashboard({ messages = [], dbcFiles = [], staleTimeoutMs = 30000
     'saved-local': 'Saved locally',
     error: 'Save failed',
   }[saveStatus];
+
+  /* ── Render a single cluster section ── */
+  const renderClusterSection = (cluster) => {
+    const clusterWidgets = widgetsByCluster[cluster.id] || [];
+    return (
+      <div
+        key={cluster.id}
+        className={`cluster-section ${cluster.collapsed ? 'collapsed' : ''}`}
+        onDragOver={editMode ? (e) => e.preventDefault() : undefined}
+        onDrop={editMode ? (e) => handleClusterHeaderDrop(e, cluster.id) : undefined}
+      >
+        <ClusterHeader
+          cluster={cluster}
+          editMode={editMode}
+          onRename={renameCluster}
+          onToggleCollapse={toggleClusterCollapse}
+          onDelete={deleteCluster}
+        />
+        {!cluster.collapsed && (
+          <div className="cluster-widgets driving-grid">
+            {clusterWidgets.length === 0 && editMode && (
+              <div className="cluster-drop-hint">Drag widgets here</div>
+            )}
+            {clusterWidgets.map((widget, index) => (
+              <DraggableWidgetCard
+                key={widget.id}
+                widget={widget}
+                index={index}
+                clusterId={cluster.id}
+                editMode={editMode}
+                catalog={catalog}
+                latestSignals={latestSignals}
+                nowMs={nowMs}
+                staleTimeoutMs={staleTimeoutMs}
+                onRemove={removeWidget}
+                onPatch={patchWidget}
+                onDragStart={handleDragStart}
+                onDragOver={handleDragOver}
+                onDragEnd={handleDragEnd}
+                onDrop={handleDrop}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="driving-dashboard">
@@ -323,6 +764,7 @@ function DrivingDashboard({ messages = [], dbcFiles = [], staleTimeoutMs = 30000
         <div className="driving-banner warning">{loadError}</div>
       )}
 
+      {/* ── Signal picker (edit mode) ── */}
       {editMode && (
         <div className="driving-picker">
           <div className="driving-picker-header">
@@ -367,6 +809,55 @@ function DrivingDashboard({ messages = [], dbcFiles = [], staleTimeoutMs = 30000
         </div>
       )}
 
+      {/* ── Create cluster UI (edit mode) ── */}
+      {editMode && (
+        <div className="cluster-create-bar">
+          <Layers size={16} />
+          <input
+            type="text"
+            placeholder="New cluster name (e.g. Battery, Inverter, Suspension)…"
+            value={newClusterName}
+            onChange={(e) => setNewClusterName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') addCluster(); }}
+          />
+          <button
+            type="button"
+            className="cluster-create-btn"
+            onClick={addCluster}
+            disabled={!newClusterName.trim()}
+          >
+            <Plus size={14} /> Create Cluster
+          </button>
+        </div>
+      )}
+
+      {/* ── Assign widget dropdown ── */}
+      {assignTarget && editMode && (
+        <div className="assign-overlay" onClick={() => setAssignTarget(null)}>
+          <div className="assign-panel" onClick={(e) => e.stopPropagation()}>
+            <h4>Move to cluster</h4>
+            <button
+              type="button"
+              className="assign-option"
+              onClick={() => assignWidgetToCluster(assignTarget, null)}
+            >
+              Ungrouped
+            </button>
+            {clusters.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                className="assign-option"
+                onClick={() => assignWidgetToCluster(assignTarget, c.id)}
+              >
+                <Layers size={13} /> {c.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Dashboard content ── */}
       {widgets.length === 0 ? (
         <div className="driving-empty">
           <Gauge size={40} />
@@ -376,135 +867,54 @@ function DrivingDashboard({ messages = [], dbcFiles = [], staleTimeoutMs = 30000
           </p>
         </div>
       ) : (
-        <div className="driving-grid">
-          {widgets.map((widget, index) => {
-            const metaEntry = getMetaFor(widget.signal_name, widget.source_dbc);
-            const meta = metaEntry?.meta || null;
-            const live = latestSignals.get(widget.signal_name);
-            const sig = live?.sig;
-            const stale = live ? isTimestampStale(live.ts, nowMs, staleTimeoutMs) : false;
-            const hasData = !!live;
-            const type = resolveDisplayType(widget, meta);
-            const label = widget.label || widget.signal_name;
-            const numeric = getNumericValue(sig);
+        <>
+          {/* Cluster sections */}
+          {clusters.map((cluster) => renderClusterSection(cluster))}
 
-            return (
-              <div
-                key={widget.id}
-                className={`driving-card size-${widget.size || 'medium'} ${stale ? 'stale' : ''} ${!hasData ? 'no-data' : ''}`}
-              >
-                <div className="driving-card-head">
-                  <span className="driving-card-label" title={widget.signal_name}>{label}</span>
-                  {editMode && (
-                    <div className="driving-card-tools">
-                      <button type="button" onClick={() => moveWidget(widget.id, -1)} disabled={index === 0} title="Move up">
-                        <ChevronUp size={14} />
-                      </button>
-                      <button type="button" onClick={() => moveWidget(widget.id, 1)} disabled={index === widgets.length - 1} title="Move down">
-                        <ChevronDown size={14} />
-                      </button>
-                      <button type="button" className="danger" onClick={() => removeWidget(widget.id)} title="Remove">
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  )}
+          {/* Ungrouped widgets */}
+          {ungroupedWidgets.length > 0 && (
+            <div
+              className="ungrouped-section"
+              onDragOver={editMode ? (e) => e.preventDefault() : undefined}
+              onDrop={editMode ? handleUngroupedDrop : undefined}
+            >
+              {clusters.length > 0 && (
+                <div className="ungrouped-label">
+                  {clusters.length > 0 ? 'Ungrouped' : ''}
                 </div>
-
-                <WidgetValue
-                  type={type}
-                  sig={sig}
-                  meta={meta}
-                  numeric={numeric}
-                  decimals={widget.decimals}
-                  hasData={hasData}
-                />
-
-                {!editMode && (
-                  <div className="driving-card-foot">
-                    <span className="driving-card-source">
-                      {live?.messageName || metaEntry?.messageName || '—'}
-                    </span>
-                    {stale && <span className="driving-card-stale">stale</span>}
-                  </div>
-                )}
-
-                {editMode && (
-                  <div className="driving-card-config">
-                    <label>
-                      Label
-                      <input
-                        type="text"
-                        value={widget.label || ''}
-                        placeholder={widget.signal_name}
-                        onChange={(e) => patchWidget(widget.id, { label: e.target.value || null })}
-                      />
-                    </label>
-                    <div className="driving-config-row">
-                      <label>
-                        Display
-                        <select
-                          value={widget.display_type || 'auto'}
-                          onChange={(e) => patchWidget(widget.id, { display_type: e.target.value })}
-                        >
-                          {DISPLAY_TYPES.map((opt) => (
-                            <option key={opt.value} value={opt.value}>{opt.label}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        Size
-                        <select
-                          value={widget.size || 'medium'}
-                          onChange={(e) => patchWidget(widget.id, { size: e.target.value })}
-                        >
-                          {SIZE_OPTIONS.map((opt) => (
-                            <option key={opt.value} value={opt.value}>{opt.label}</option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-                    {(type === 'number' || type === 'gauge') && (
-                      <label>
-                        Decimals
-                        <input
-                          type="number"
-                          min="0"
-                          max="6"
-                          value={widget.decimals == null ? '' : widget.decimals}
-                          placeholder="auto"
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            patchWidget(widget.id, { decimals: v === '' ? null : Math.max(0, Math.min(6, parseInt(v, 10) || 0)) });
-                          }}
-                        />
-                      </label>
-                    )}
-                    {catalog.get(widget.signal_name)?.length > 1 && (
-                      <label>
-                        DBC source
-                        <select
-                          value={widget.source_dbc || ''}
-                          onChange={(e) => patchWidget(widget.id, { source_dbc: e.target.value || null })}
-                        >
-                          {catalog.get(widget.signal_name).map((entry) => (
-                            <option key={`${entry.sourceDbc}_${entry.messageName}`} value={entry.sourceDbc || ''}>
-                              {entry.sourceDbc || 'unknown'} · {entry.messageName}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    )}
-                  </div>
-                )}
+              )}
+              <div className="driving-grid">
+                {ungroupedWidgets.map((widget, index) => (
+                  <DraggableWidgetCard
+                    key={widget.id}
+                    widget={widget}
+                    index={index}
+                    clusterId={null}
+                    editMode={editMode}
+                    catalog={catalog}
+                    latestSignals={latestSignals}
+                    nowMs={nowMs}
+                    staleTimeoutMs={staleTimeoutMs}
+                    onRemove={removeWidget}
+                    onPatch={patchWidget}
+                    onDragStart={handleDragStart}
+                    onDragOver={handleDragOver}
+                    onDragEnd={handleDragEnd}
+                    onDrop={handleDrop}
+                  />
+                ))}
               </div>
-            );
-          })}
-        </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
 }
 
+/* ──────────────────────────────────────────────────────
+   Value renderers (unchanged from original)
+   ────────────────────────────────────────────────────── */
 function WidgetValue({ type, sig, meta, numeric, decimals, hasData }) {
   if (!hasData) {
     return (

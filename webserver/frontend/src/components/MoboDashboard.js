@@ -20,6 +20,7 @@ const MOBO_MESSAGE_NAMES = new Set([
   'MOBO_CAN_Stats',
   'MOBO_Power_Telemetry',
   'MOBO_Current_Telemetry',
+  'MOBO_LV_Consumption',
   'MOBO_Safety_Status',
   'MOBO_Relay_Status',
 ]);
@@ -599,6 +600,17 @@ function MoboDashboard({
                 <div><span>HC</span><strong>{getDisplay(getSignal('MOBO_HC_Current'), '--', 3)}</strong></div>
                 <div><span>LV Peak</span><strong>{getDisplay(getSignal('MOBO_LV_Current_Peak'), '--', 3)}</strong></div>
                 <div><span>HC Peak</span><strong>{getDisplay(getSignal('MOBO_HC_Current_Peak'), '--', 3)}</strong></div>
+              </div>
+            </section>
+
+            <section className="mobo-card">
+              <div className="mobo-card-header">
+                <Activity size={18} /><span>LV Consumption</span>
+                {renderFreshness('MOBO_LV_Consumption')}
+              </div>
+              <div className="mobo-kpi-value">{getDisplay(getSignal('MOBO_LV_Ah_Consumed'), '--', 3)}</div>
+              <div className="mobo-heartbeat-summary">
+                <span>Integrated positive LV draw since boot</span>
               </div>
             </section>
           </div>

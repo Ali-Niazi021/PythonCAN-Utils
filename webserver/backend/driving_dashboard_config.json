@@ -1,6 +1,15 @@
 {
   "widgets": [
     {
+      "id": "w_mq0l26ir_pdonvb",
+      "signal_name": "HVC_Batt_Voltage_mV",
+      "source_dbc": "hvc.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
+    },
+    {
       "id": "w_mpxhrvp2_koo4te",
       "signal_name": "CMD_Torque_Command",
       "source_dbc": "BMS-Inverter-Only.dbc",
@@ -10,17 +19,8 @@
       "size": "medium"
     },
     {
-      "id": "w_mpz2rfs8_zqw442",
-      "signal_name": "HVC_Current_Low_mA",
-      "source_dbc": "hvc.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mpxhxv9q_gk2u14",
-      "signal_name": "VCU_BSE_PSI",
+      "id": "w_mq0jj3h2_1catpq",
+      "signal_name": "VCU_APPS_Value",
       "source_dbc": "VCU.dbc",
       "label": null,
       "display_type": "auto",
@@ -37,31 +37,40 @@
       "size": "medium"
     },
     {
-      "id": "w_mpxhs56w_eqk66b",
-      "signal_name": "DBF_WSPD_FL_MPH",
-      "source_dbc": "DAQ-Firmware.dbc",
-      "label": null,
-      "display_type": "number",
-      "decimals": null,
-      "size": "small"
-    },
-    {
-      "id": "w_mpxhsa92_a0jotl",
-      "signal_name": "DBF_WSPD_FR_MPH",
-      "source_dbc": "DAQ-Firmware.dbc",
-      "label": null,
-      "display_type": "number",
-      "decimals": null,
-      "size": "small"
-    },
-    {
-      "id": "w_mpz24mlu_eoox7g",
-      "signal_name": "DBL_WSPD_BL_MPH",
-      "source_dbc": "DAQ-Firmware.dbc",
+      "id": "w_mpz2rfs8_zqw442",
+      "signal_name": "HVC_Current_Low_mA",
+      "source_dbc": "hvc.dbc",
       "label": null,
       "display_type": "auto",
       "decimals": null,
-      "size": "small"
+      "size": "medium"
+    },
+    {
+      "id": "w_mq1zadnc_ec8udj",
+      "signal_name": "INV_DC_Bus_Current",
+      "source_dbc": "BMS-Inverter-Only.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
+    },
+    {
+      "id": "w_mq1z5cwt_bmx83u",
+      "signal_name": "VCU_INV_Discharge_Current_Limit",
+      "source_dbc": "VCU.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
+    },
+    {
+      "id": "w_mpxhxv9q_gk2u14",
+      "signal_name": "VCU_BSE_PSI",
+      "source_dbc": "VCU.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium"
     },
     {
       "id": "w_mpxhv7et_x49tnf",
@@ -208,18 +217,9 @@
       "size": "medium"
     },
     {
-      "id": "w_mq0jj3h2_1catpq",
-      "signal_name": "VCU_APPS_Value",
+      "id": "w_mq2x5rz5_cr4cwp",
+      "signal_name": "VCU_Speed_MPH",
       "source_dbc": "VCU.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mq0l26ir_pdonvb",
-      "signal_name": "HVC_Batt_Voltage_mV",
-      "source_dbc": "hvc.dbc",
       "label": null,
       "display_type": "auto",
       "decimals": null,

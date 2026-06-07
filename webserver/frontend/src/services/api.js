@@ -184,9 +184,10 @@ class ApiService {
     return response.data;
   }
 
-  async saveDrivingDashboardConfig(widgets) {
+  async saveDrivingDashboardConfig(widgets, clusters) {
     const response = await this.client.post('/driving_dashboard/config', {
       widgets: widgets,
+      clusters: clusters || [],
     });
     return response.data;
   }
