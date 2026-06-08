@@ -394,14 +394,23 @@ function HVCDashboard({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
             const bmbModNum = getNumeric(bmbFaultModule);
             const bmbStateText = getDisplay(bmbFaultState, null);
             const bmbStateNum = getNumeric(bmbFaultState);
-            const hasBmbFault = (bmbModNum !== null && bmbModNum !== 255) || (bmbStateNum !== null && bmbStateNum !== 1);
             if (bmbModNum === null && bmbStateNum === null) return null;
+            // Only FAULT (5) is red; INIT (0) is blue; BALANCING (4) is purple; all others green.
+            const stateKey = bmbStateNum != null ? HVC_BMB_FAULT_STATES[bmbStateNum] : null;
+            const colorClass = stateKey === 'FAULT' ? 'faulted'
+              : stateKey === 'INIT' ? 'init'
+              : stateKey === 'BALANCING' ? 'balancing'
+              : 'ok';
             return (
-              <div className={`hvc-bmb-fault ${hasBmbFault ? 'faulted' : 'ok'}`}>
+              <div className={`hvc-bmb-fault ${colorClass}`}>
                 <div className="hvc-bmb-fault-header">
                   <span className="hvc-bmb-fault-title">BMB Fault</span>
-                  {hasBmbFault ? (
+                  {colorClass === 'faulted' ? (
                     <span className="hvc-badge bad">FAULTED</span>
+                  ) : colorClass === 'init' ? (
+                    <span className="hvc-badge" style={{ background: 'rgba(59,130,246,0.2)', color: '#93c5fd', borderColor: 'rgba(59,130,246,0.5)' }}>INIT</span>
+                  ) : colorClass === 'balancing' ? (
+                    <span className="hvc-badge" style={{ background: 'rgba(139,92,246,0.2)', color: '#c4b5fd', borderColor: 'rgba(139,92,246,0.5)' }}>BALANCING</span>
                   ) : (
                     <span className="hvc-badge good">OK</span>
                   )}
