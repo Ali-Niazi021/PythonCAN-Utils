@@ -5,7 +5,6 @@ import './CANExplorer.css';
 
 const BUS_IDS = ['bus1', 'bus2'];
 const VCU_LOG_EVENT_FLAG_CAN_ID = 2366639360;
-const VCU_LOG_EVENT_FLAG_DATA = [1, 0, 0, 0, 0, 0, 0, 0];
 const VCU_LOG_EVENT_FLAG_INTERVAL_MS = 10;
 const VCU_LOG_EVENT_FLAG_DURATION_MS = 1000;
 
@@ -19,6 +18,34 @@ const readStoredValue = (key, fallback) => {
   }
   return window.localStorage.getItem(key) || fallback;
 };
+
+const parseEventFlagValue = (rawValue) => {
+  const text = String(rawValue || '').trim();
+  if (!text) return null;
+
+  const parsed = /^0x/i.test(text)
+    ? parseInt(text.slice(2), 16)
+    : Number(text);
+
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 0xFFFFFFFF) {
+    return null;
+  }
+
+  return parsed >>> 0;
+};
+
+const encodeEventFlagData = (value) => [
+  value & 0xFF,
+  (value >>> 8) & 0xFF,
+  (value >>> 16) & 0xFF,
+  (value >>> 24) & 0xFF,
+  0,
+  0,
+  0,
+  0,
+];
+
+const formatEventFlagValue = (value) => `${value} / 0x${value.toString(16).padStart(8, '0').toUpperCase()}`;
 
 const createInitialConnectionDraft = (busId) => ({
   deviceType: 'canable',
@@ -127,6 +154,7 @@ function CANExplorer({
   const [selectedTransmitBusId, setSelectedTransmitBusId] = useState(() => readStoredValue('selectedTransmitBusId', 'bus1'));
   const [eventFlagStatus, setEventFlagStatus] = useState(null);
   const [eventFlagBurstActive, setEventFlagBurstActive] = useState(false);
+  const [eventFlagValueInput, setEventFlagValueInput] = useState(() => readStoredValue('eventFlagValueInput', '1'));
   const eventFlagIntervalRef = useRef(null);
   const eventFlagTimeoutRef = useRef(null);
 
@@ -275,6 +303,17 @@ function CANExplorer({
       return;
     }
 
+    const eventFlagValue = parseEventFlagValue(eventFlagValueInput);
+    if (eventFlagValue === null) {
+      setEventFlagStatus({
+        type: 'error',
+        text: 'Enter a valid 32-bit marker value from 0 to 4294967295 (decimal or 0x hex).',
+      });
+      return;
+    }
+
+    const eventFlagData = encodeEventFlagData(eventFlagValue);
+
     const targetBusId = connectedBusIds.includes(selectedTransmitBusId)
       ? selectedTransmitBusId
       : connectedBusIds[0] || null;
@@ -289,14 +328,14 @@ function CANExplorer({
 
     setEventFlagStatus({
       type: 'success',
-      text: `Sending 0x${VCU_LOG_EVENT_FLAG_CAN_ID.toString(16).toUpperCase()} on ${getBusLabel(targetBusId)} for 1s.`,
+      text: `Sending marker ${formatEventFlagValue(eventFlagValue)} on ${getBusLabel(targetBusId)} for 1s.`,
     });
     setEventFlagBurstActive(true);
 
     const sendEventFlag = async () => {
       const ok = await onSendMessage(
         VCU_LOG_EVENT_FLAG_CAN_ID,
-        VCU_LOG_EVENT_FLAG_DATA,
+        eventFlagData,
         true,
         false,
         targetBusId
@@ -312,7 +351,7 @@ function CANExplorer({
 
     const firstSendOk = await onSendMessage(
       VCU_LOG_EVENT_FLAG_CAN_ID,
-      VCU_LOG_EVENT_FLAG_DATA,
+      eventFlagData,
       true,
       false,
       targetBusId
@@ -333,10 +372,10 @@ function CANExplorer({
     eventFlagTimeoutRef.current = setTimeout(() => {
       stopEventFlagBurst({
         type: 'success',
-        text: `Event flag burst finished on ${getBusLabel(targetBusId)}.`,
+        text: `Marker ${formatEventFlagValue(eventFlagValue)} finished on ${getBusLabel(targetBusId)}.`,
       });
     }, VCU_LOG_EVENT_FLAG_DURATION_MS);
-  }, [connectedBusIds, eventFlagBurstActive, onSendMessage, selectedTransmitBusId, stopEventFlagBurst]);
+  }, [connectedBusIds, eventFlagBurstActive, eventFlagValueInput, onSendMessage, selectedTransmitBusId, stopEventFlagBurst]);
 
   const busStatsMap = useMemo(() => {
     const statEntries = Array.isArray(stats?.buses) ? stats.buses : [];
@@ -365,9 +404,15 @@ function CANExplorer({
     localStorage.setItem('selectedTransmitBusId', selectedTransmitBusId);
   }, [selectedTransmitBusId]);
 
+  useEffect(() => {
+    localStorage.setItem('eventFlagValueInput', eventFlagValueInput);
+  }, [eventFlagValueInput]);
+
   useEffect(() => () => {
     stopEventFlagBurst();
   }, [stopEventFlagBurst]);
+
+  const parsedEventFlagValue = parseEventFlagValue(eventFlagValueInput);
 
   const updateConnectionDraft = useCallback((busId, patch) => {
     setConnectionDrafts((previousDrafts) => ({
@@ -1312,17 +1357,33 @@ function CANExplorer({
             <Flag size={18} />
             <span>Event Flag</span>
           </div>
+          <div className="form-group">
+            <label htmlFor="event-flag-value-input">Marker Value</label>
+            <input
+              id="event-flag-value-input"
+              type="text"
+              value={eventFlagValueInput}
+              onChange={(event) => setEventFlagValueInput(event.target.value)}
+              placeholder="1 or 0x00000001"
+              disabled={eventFlagBurstActive}
+            />
+          </div>
+          {parsedEventFlagValue !== null && (
+            <div className="event-flag-preview">
+              Payload value: <strong>{formatEventFlagValue(parsedEventFlagValue)}</strong>
+            </div>
+          )}
           <button
             className={`btn btn-block ${eventFlagBurstActive ? 'btn-warning' : 'btn-primary'}`}
             onClick={handleTriggerEventFlag}
             disabled={!onSendMessage || connectedBusIds.length === 0 || eventFlagBurstActive}
-            title="Send the VCU event flag frame every 10ms for 1 second"
+            title="Send the VCU event flag frame every 10ms for 1 second using the configured 32-bit marker"
           >
             <Flag size={16} />
             {eventFlagBurstActive ? 'Sending Event Flag...' : 'Flag Event In Logs'}
           </button>
           <div className="event-flag-hint">
-            Sends VCU_LOG_Event_Flag on the selected transmit bus at 10 ms for 1 second.
+            Sends VCU_LOG_Event_Flag on the selected transmit bus at 10 ms for 1 second. The first 4 data bytes carry the marker as a little-endian 32-bit value.
           </div>
           {eventFlagStatus && (
             <div className={`sidebar-status ${eventFlagStatus.type === 'success' ? 'success' : ''}`}>

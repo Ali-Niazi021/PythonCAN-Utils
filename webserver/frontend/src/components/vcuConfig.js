@@ -138,7 +138,7 @@ export const buildVcuConfigFrame = (mux, config) => {
   bytes[0] = mux;
   const view = new DataView(bytes.buffer);
 
-  if (mux === 0) view.setInt16(1, Math.round(Number(config.maxTorqueNm || 0) * 10), true);
+  if (mux === 0) view.setUint16(1, Math.round(clampNumber(config.maxTorqueNm, 0, 230, 0)), true);
   if (mux === 1) bytes[1] = Number(config.motorDirection) ? 1 : 0;
   if (mux === 2) bytes[1] = config.regenEnabled ? 1 : 0;
   if (mux === 3) {

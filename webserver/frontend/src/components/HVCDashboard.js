@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Battery, Activity, Gauge, Thermometer, AlertTriangle, Zap, RotateCcw, Radio,
 } from 'lucide-react';
@@ -79,9 +79,24 @@ const formatVoltsFromMv = (signal) => {
   return v === null ? '--' : `${(v / 1000).toFixed(2)} V`;
 };
 
+const formatVolts = (signal) => {
+  const v = getNumeric(signal);
+  return v === null ? '--' : `${v.toFixed(2)} V`;
+};
+
 const formatAmpsFromMa = (signal) => {
   const v = getNumeric(signal);
   return v === null ? '--' : `${(v / 1000).toFixed(2)} A`;
+};
+
+const formatAmps = (signal) => {
+  const v = getNumeric(signal);
+  return v === null ? '--' : `${v.toFixed(2)} A`;
+};
+
+const formatPowerKw = (signal) => {
+  const v = getNumeric(signal);
+  return v === null ? '--' : `${v.toFixed(2)} kW`;
 };
 
 const formatTempC = (signal) => {
@@ -327,8 +342,8 @@ function HVCDashboard({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
             <Zap size={18} /><span>Voltage Sense</span>{renderFreshness(frames.ioVSense)}
           </div>
           <div className="hvc-split-grid">
-            <div><span>Battery</span><strong>{formatVoltsFromMv(getSignal(ioVSense, 'HVC_Batt_Voltage_mV', 'Batt_Voltage_mV'))}</strong></div>
-            <div><span>Inverter</span><strong>{formatVoltsFromMv(getSignal(ioVSense, 'HVC_Inv_Voltage_mV', 'Inv_Voltage_mV'))}</strong></div>
+            <div><span>Battery</span><strong>{formatVolts(getSignal(ioVSense, 'HVC_Batt_Voltage_V', 'Batt_Voltage_V'))}</strong></div>
+            <div><span>Inverter</span><strong>{formatVolts(getSignal(ioVSense, 'HVC_Inv_Voltage_V', 'Inv_Voltage_V'))}</strong></div>
           </div>
         </div>
 
@@ -337,8 +352,19 @@ function HVCDashboard({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
             <Activity size={18} /><span>Bus Current</span>{renderFreshness(frames.ioCurrent)}
           </div>
           <div className="hvc-split-grid">
-            <div><span>Low Channel</span><strong>{formatAmpsFromMa(getSignal(ioCurrent, 'HVC_Current_Low_mA', 'Current_Low_mA'))}</strong></div>
-            <div><span>High Channel</span><strong>{formatAmpsFromMa(getSignal(ioCurrent, 'HVC_Current_High_mA', 'Current_High_mA'))}</strong></div>
+            <div><span>Low Channel</span><strong>{formatAmps(getSignal(ioCurrent, 'HVC_Current_Low_A', 'Current_Low_A'))}</strong></div>
+            <div><span>High Channel</span><strong>{formatAmps(getSignal(ioCurrent, 'HVC_Current_High_A', 'Current_High_A'))}</strong></div>
+            <div><span>Pack Current</span><strong>{formatAmps(getSignal(ioCurrent, 'HVC_Pack_Current_A', 'Pack_Current_A'))}</strong></div>
+          </div>
+        </div>
+
+        <div className="hvc-kpi-card">
+          <div className="hvc-card-header">
+            <Zap size={18} /><span>Pack Power</span>{renderFreshness(frames.ioSummary)}
+          </div>
+          <div className="hvc-split-grid">
+            <div><span>Current</span><strong>{formatPowerKw(getSignal(ioSummary, 'HVC_Pack_Power_kW', 'Pack_Power_kW'))}</strong></div>
+            <div><span>Peak</span><strong>{formatPowerKw(getSignal(ioSummary, 'HVC_Peak_Pack_Power_kW', 'Peak_Pack_Power_kW'))}</strong></div>
           </div>
         </div>
       </div>

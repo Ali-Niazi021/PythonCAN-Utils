@@ -720,7 +720,7 @@ function VCUDashboard({ messages, dbcFiles = [], onSendMessage, staleTimeoutMs =
             {mux === 0 && (
               <label>
                 Max torque (Nm)
-                <input type="number" min="-230" max="230" step="0.1" value={config.maxTorqueNm} onChange={(event) => setConfig((prev) => ({ ...prev, maxTorqueNm: event.target.value }))} />
+                <input type="number" min="0" max="230" step="1" value={config.maxTorqueNm} onChange={(event) => setConfig((prev) => ({ ...prev, maxTorqueNm: event.target.value }))} />
               </label>
             )}
             {mux === 1 && (
