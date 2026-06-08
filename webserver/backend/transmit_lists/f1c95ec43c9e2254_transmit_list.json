@@ -1,0 +1,24 @@
+{
+  "dbc_file": "dbcset-4ef47e99d2d5",
+  "items": [
+    {
+      "id": "1780874617889-0.8505211152012915",
+      "can_id": 4194809,
+      "data": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "is_extended": true,
+      "message_name": null,
+      "signals": null,
+      "description": "Custom message 0x4001f9",
+      "cycle_time": 500
+    }
+  ]
+}

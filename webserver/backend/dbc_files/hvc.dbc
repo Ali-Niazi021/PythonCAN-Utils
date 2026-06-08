@@ -48,7 +48,7 @@ BO_ 2151678455 HVC_IO_VSense: 8 HVC
  SG_ HVC_Batt_Voltage_mV : 0|32@1+ (1,0) [0|4294967295] "mV" Vector__XXX
  SG_ HVC_Inv_Voltage_mV : 32|32@1+ (1,0) [0|4294967295] "mV" Vector__XXX
 
-BO_ 2151678449 HVC_BMS_State: 5 HVC
+BO_ 2151678449 HVC_BMS_State: 7 HVC
  SG_ HVC_BMS_State : 0|8@1+ (1,0) [0|255] "" Vector__XXX
  SG_ HVC_Err_RefOverTemp : 8|1@1+ (1,0) [0|1] "" Vector__XXX
  SG_ HVC_Err_ModuleTimeout : 9|1@1+ (1,0) [0|1] "" Vector__XXX
@@ -57,6 +57,8 @@ BO_ 2151678449 HVC_BMS_State: 5 HVC
  SG_ HVC_Err_BmbError : 12|1@1+ (1,0) [0|1] "" Vector__XXX
  SG_ HVC_Err_BmsCanError : 13|1@1+ (1,0) [0|1] "" Vector__XXX
  SG_ HVC_Err_LvCanError : 14|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ HVC_BMB_Fault_Module : 40|8@1+ (1,0) [0|255] "" Vector__XXX
+ SG_ HVC_BMB_Fault_State : 48|8@1+ (1,0) [0|6] "" Vector__XXX
 
 BO_ 2151678450 HVC_Errored_Panic: 0 HVC
 
@@ -87,3 +89,5 @@ VAL_ 2151678449 HVC_Err_CurrSenseFloating 0 "Inactive" 1 "Active" ;
 VAL_ 2151678449 HVC_Err_BmbError 0 "Inactive" 1 "Active" ;
 VAL_ 2151678449 HVC_Err_BmsCanError 0 "Inactive" 1 "Active" ;
 VAL_ 2151678449 HVC_Err_LvCanError 0 "Inactive" 1 "Active" ;
+VAL_ 2151678449 HVC_BMB_Fault_Module 255 "None" ;
+VAL_ 2151678449 HVC_BMB_Fault_State 0 "INIT" 1 "IDLE" 2 "CHARGING" 3 "DISCHARGING" 4 "BALANCING" 5 "FAULT" 6 "RESERVED" ;

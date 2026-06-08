@@ -1,8 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Battery, Activity, Gauge, Thermometer, AlertTriangle, Zap, RotateCcw, Settings, Radio,
+  Battery, Activity, Gauge, Thermometer, AlertTriangle, Zap, RotateCcw, Radio,
 } from 'lucide-react';
-import { apiService } from '../services/api';
 import { useNowTick, isTimestampStale, messageFreshnessTimestamp } from '../hooks/useStaleness';
 import './HVCDashboard.css';
 
@@ -13,12 +12,6 @@ const HVC_RESET_DATA = [0, 0, 0, 0, 0, 0, 0, 0];
 // BMB CAN passthrough enable/disable command (extended ID, defined in hvc.dbc
 // as BMB_Passthrough_Control). DLC = 1, byte 0 bit 0 carries the request.
 const HVC_BMB_PASSTHROUGH_CAN_ID = 0x004001FB;
-
-const HVC_TEST_VOLTAGE_MIN = 2.5;
-const HVC_TEST_VOLTAGE_MAX = 4.3;
-const HVC_TEST_TEMP_MIN = 20;
-const HVC_TEST_TEMP_MAX = 80;
-const HVC_TEST_DEBOUNCE_MS = 250;
 
 // Map DBC message names → state key on this component.
 const HVC_MESSAGE_MAP = {
@@ -53,6 +46,9 @@ const EMETER_THERM_SIGNALS = [
 
 // Known BMS_State enum names from hvc.dbc.
 const HVC_BMS_STATES = ['PRE_INIT', 'RUNNING', 'CHARGING', 'BALANCING', 'ERRORED'];
+
+// Known BMB_Fault_State enum names from hvc.dbc.
+const HVC_BMB_FAULT_STATES = ['INIT', 'IDLE', 'CHARGING', 'DISCHARGING', 'BALANCING', 'FAULT', 'RESERVED'];
 
 // Extract numeric value from server-decoded signal payload (object {value, raw, unit}).
 const getNumeric = (signal) => {
@@ -153,80 +149,6 @@ function HVCDashboard({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
   const [passthroughBusy, setPassthroughBusy] = useState(false);
   const [passthroughStatus, setPassthroughStatus] = useState(null);
 
-  // ---- HVC test-mode backend controls --------------------------------------
-  const [testEnabled, setTestEnabled] = useState(false);
-  const [testBusy, setTestBusy] = useState(false);
-  const [testStatus, setTestStatus] = useState(null);
-  const [testConfig, setTestConfig] = useState({
-    minVoltageV: 3.2,
-    maxVoltageV: 4.1,
-    minTempC: 28,
-    maxTempC: 55,
-    errorFlagsByte0: 0,
-    errorFlagsByte1: 0,
-    errorFlagsByte2: 0,
-    errorFlagsByte3: 0,
-    warningSummary: 0,
-    faultCount: 0,
-  });
-  const testHydratedRef = useRef(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const status = await apiService.getHVCTestModeStatus();
-        if (cancelled || !status) return;
-
-        setTestEnabled(Boolean(status.enabled));
-        if (status.all_modules) {
-          const a = status.all_modules;
-          const e = status.heartbeat_errors || {};
-          const clamp = (val, lo, hi, fallback) => {
-            const num = Number(val);
-            return Number.isFinite(num) ? Math.max(lo, Math.min(hi, num)) : fallback;
-          };
-          const minV = clamp(a.min_voltage_v, HVC_TEST_VOLTAGE_MIN, HVC_TEST_VOLTAGE_MAX, 3.2);
-          const maxV = clamp(a.max_voltage_v, minV, HVC_TEST_VOLTAGE_MAX, 4.1);
-          const minT = clamp(a.min_temp_c, HVC_TEST_TEMP_MIN, HVC_TEST_TEMP_MAX, 28);
-          const maxT = clamp(a.max_temp_c, minT, HVC_TEST_TEMP_MAX, 55);
-          setTestConfig({
-            minVoltageV: minV,
-            maxVoltageV: maxV,
-            minTempC: minT,
-            maxTempC: maxT,
-            errorFlagsByte0: clamp(e.error_flags_byte0, 0, 255, 0),
-            errorFlagsByte1: clamp(e.error_flags_byte1, 0, 255, 0),
-            errorFlagsByte2: clamp(e.error_flags_byte2, 0, 255, 0),
-            errorFlagsByte3: clamp(e.error_flags_byte3, 0, 255, 0),
-            warningSummary: clamp(e.warning_summary, 0, 255, 0),
-            faultCount: clamp(e.fault_count, 0, 255, 0),
-          });
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setTestStatus({ type: 'error', text: `Failed to load test mode: ${err?.message || err}` });
-        }
-      } finally {
-        if (!cancelled) testHydratedRef.current = true;
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  useEffect(() => {
-    if (!testHydratedRef.current) return undefined;
-    const id = setTimeout(() => {
-      apiService.setHVCTestModeConfig(testConfig).catch((err) => {
-        setTestStatus({
-          type: 'error',
-          text: `Failed to update test mode config: ${err?.response?.data?.detail || err?.message || err}`,
-        });
-      });
-    }, HVC_TEST_DEBOUNCE_MS);
-    return () => clearTimeout(id);
-  }, [testConfig]);
-
   // ---- Aggregate latest HVC frames ----------------------------------------
   const frames = useMemo(() => {
     const acc = {
@@ -305,43 +227,6 @@ function HVCDashboard({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
     } finally {
       setPassthroughBusy(false);
     }
-  };
-
-  const handleToggleTestMode = async () => {
-    const next = !testEnabled;
-    setTestBusy(true);
-    setTestStatus({ type: 'pending', text: next ? 'Enabling HVC test mode...' : 'Disabling HVC test mode...' });
-    try {
-      const status = await apiService.setHVCTestModeEnabled(next);
-      const enabled = Boolean(status?.enabled);
-      setTestEnabled(enabled);
-      setTestStatus({ type: 'success', text: enabled ? 'HVC test mode enabled' : 'HVC test mode disabled' });
-    } catch (err) {
-      setTestStatus({
-        type: 'error',
-        text: `Failed to toggle test mode: ${err?.response?.data?.detail || err?.message || err}`,
-      });
-    } finally {
-      setTestBusy(false);
-    }
-  };
-
-  const updateTestNumber = (key, raw, lo, hi, decimals = 2) => {
-    const num = Number(raw);
-    if (!Number.isFinite(num)) return;
-    setTestConfig((prev) => ({
-      ...prev,
-      [key]: Number(Math.max(lo, Math.min(hi, num)).toFixed(decimals)),
-    }));
-  };
-
-  const updateTestByte = (key, raw) => {
-    const num = Number(raw);
-    if (!Number.isFinite(num)) return;
-    setTestConfig((prev) => ({
-      ...prev,
-      [key]: Math.max(0, Math.min(255, Math.round(num))),
-    }));
   };
 
   // ---- Derived signals -----------------------------------------------------
@@ -503,6 +388,49 @@ function HVCDashboard({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
               </span>
             ))}
           </div>
+          {(() => {
+            const bmbFaultModule = getSignal(bmsState, 'HVC_BMB_Fault_Module', 'BMB_Fault_Module');
+            const bmbFaultState = getSignal(bmsState, 'HVC_BMB_Fault_State', 'BMB_Fault_State');
+            const bmbModNum = getNumeric(bmbFaultModule);
+            const bmbStateText = getDisplay(bmbFaultState, null);
+            const bmbStateNum = getNumeric(bmbFaultState);
+            const hasBmbFault = (bmbModNum !== null && bmbModNum !== 255) || (bmbStateNum !== null && bmbStateNum !== 1);
+            if (bmbModNum === null && bmbStateNum === null) return null;
+            return (
+              <div className={`hvc-bmb-fault ${hasBmbFault ? 'faulted' : 'ok'}`}>
+                <div className="hvc-bmb-fault-header">
+                  <span className="hvc-bmb-fault-title">BMB Fault</span>
+                  {hasBmbFault ? (
+                    <span className="hvc-badge bad">FAULTED</span>
+                  ) : (
+                    <span className="hvc-badge good">OK</span>
+                  )}
+                </div>
+                <div className="hvc-bmb-fault-details">
+                  <div className="hvc-metric">
+                    <span>Fault Module</span>
+                    <strong>{bmbModNum === 255 ? 'None' : (bmbModNum != null ? `Module ${bmbModNum}` : '--')}</strong>
+                  </div>
+                  <div className="hvc-metric">
+                    <span>Fault State</span>
+                    <strong>{bmbStateText != null ? bmbStateText : '--'}</strong>
+                  </div>
+                </div>
+                {bmbStateNum != null && (
+                  <div className="hvc-state-chip-row" style={{ marginTop: 6 }}>
+                    {HVC_BMB_FAULT_STATES.map((s) => (
+                      <span
+                        key={s}
+                        className={`hvc-state-chip state-${s.toLowerCase()} ${HVC_BMB_FAULT_STATES[bmbStateNum] === s ? 'active' : ''}`}
+                      >
+                        {s}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           {stateFlags.length > 0 ? (
             <div className="hvc-flag-grid">
               {stateFlags.map(([name, value]) => {
@@ -561,79 +489,6 @@ function HVCDashboard({ messages, onSendMessage, staleTimeoutMs = 30000 }) {
           </div>
         </section>
       </div>
-
-      <section className={`hvc-test-card ${testEnabled ? 'enabled' : ''}`}>
-        <div className="hvc-card-header">
-          <Settings size={17} /><h3>Test Mode (synthetic BMS heartbeats)</h3>
-        </div>
-        <p className="hvc-test-help">
-          Drives synthetic <code>Cell_Temp_Summary</code>, <code>BMS_Voltage_Summary</code> and
-          <code> BMS_Heartbeat</code> frames out the active CAN bus for all 6 modules so the HVC
-          can be exercised without a real pack. Requires an active CAN connection and the
-          BMS DBC loaded.
-        </p>
-
-        <div className="hvc-test-toolbar">
-          <button
-            type="button"
-            className={`hvc-test-toggle ${testEnabled ? 'on' : 'off'}`}
-            onClick={handleToggleTestMode}
-            disabled={testBusy}
-          >
-            {testBusy ? 'Working...' : `Test Mode: ${testEnabled ? 'ON' : 'OFF'}`}
-          </button>
-          {testStatus && (
-            <span className={`hvc-status-pill ${testStatus.type}`}>{testStatus.text}</span>
-          )}
-        </div>
-
-        <div className="hvc-test-sliders">
-          {[
-            { key: 'minVoltageV', label: 'Min Voltage', min: HVC_TEST_VOLTAGE_MIN, max: HVC_TEST_VOLTAGE_MAX, step: 0.01, suffix: 'V', dec: 2 },
-            { key: 'maxVoltageV', label: 'Max Voltage', min: HVC_TEST_VOLTAGE_MIN, max: HVC_TEST_VOLTAGE_MAX, step: 0.01, suffix: 'V', dec: 2 },
-            { key: 'minTempC', label: 'Min Temp', min: HVC_TEST_TEMP_MIN, max: HVC_TEST_TEMP_MAX, step: 1, suffix: '°C', dec: 0 },
-            { key: 'maxTempC', label: 'Max Temp', min: HVC_TEST_TEMP_MIN, max: HVC_TEST_TEMP_MAX, step: 1, suffix: '°C', dec: 0 },
-          ].map(({ key, label, min, max, step, suffix, dec }) => (
-            <div className="hvc-slider-row" key={key}>
-              <label htmlFor={`hvc-test-${key}`}>{label}</label>
-              <input
-                id={`hvc-test-${key}`}
-                type="range"
-                min={min}
-                max={max}
-                step={step}
-                value={testConfig[key]}
-                onChange={(e) => updateTestNumber(key, e.target.value, min, max, dec)}
-              />
-              <span>{Number(testConfig[key]).toFixed(dec)} {suffix}</span>
-            </div>
-          ))}
-        </div>
-
-        <div className="hvc-test-bytes">
-          {[
-            ['errorFlagsByte0', 'Err Byte 0'],
-            ['errorFlagsByte1', 'Err Byte 1'],
-            ['errorFlagsByte2', 'Err Byte 2'],
-            ['errorFlagsByte3', 'Err Byte 3'],
-            ['warningSummary', 'Warning'],
-            ['faultCount', 'Fault Count'],
-          ].map(([key, label]) => (
-            <div className="hvc-byte-row" key={key}>
-              <label htmlFor={`hvc-test-${key}`}>{label}</label>
-              <input
-                id={`hvc-test-${key}`}
-                type="number"
-                min="0"
-                max="255"
-                step="1"
-                value={testConfig[key]}
-                onChange={(e) => updateTestByte(key, e.target.value)}
-              />
-            </div>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }
