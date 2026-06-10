@@ -2,37 +2,91 @@
   gap: 18px;
 }
 
+.vcu-launch-top-grid {
+  align-items: start;
+}
+
+.vcu-launch-state-chip {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid #333;
+  background: #111;
+  color: #f3f4f6;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.vcu-launch-state-chip.state-0 {
+  color: #d1d5db;
+  border-color: #3f3f46;
+}
+
+.vcu-launch-state-chip.state-1 {
+  color: #fde68a;
+  border-color: #92400e;
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.vcu-launch-state-chip.state-2 {
+  color: #86efac;
+  border-color: #166534;
+  background: rgba(34, 197, 94, 0.12);
+}
+
+.vcu-launch-live-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  color: #aaa;
+  font-size: 13px;
+}
+
+.vcu-launch-live-grid strong {
+  display: block;
+  margin-top: 4px;
+  color: #fff;
+}
+
+.vcu-launch-armed-note,
 .vcu-launch-copy {
   margin: 0;
   color: #9ca3af;
   font-size: 13px;
 }
 
-.vcu-launch-sections {
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-}
-
-.vcu-launch-action-grid {
+.vcu-launch-action-stack {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
-.vcu-launch-action-grid button,
+.vcu-launch-action-stack button,
 .vcu-launch-button-row button {
-  min-height: 38px;
+  min-height: 42px;
   border: 0;
-  border-radius: 6px;
-  background: #dc2626;
+  border-radius: 8px;
   color: #fff;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
 }
 
-.vcu-launch-action-grid button:disabled,
+.vcu-launch-action-stack button:disabled,
 .vcu-launch-button-row button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.vcu-launch-arm-button {
+  background: linear-gradient(135deg, #d97706, #f59e0b);
+}
+
+.vcu-launch-disarm-button,
+.vcu-launch-button-row button:first-child {
+  background: linear-gradient(135deg, #b91c1c, #ef4444);
 }
 
 .vcu-launch-secondary {
@@ -47,98 +101,52 @@
   font-size: 12px;
 }
 
-.vcu-launch-warning {
-  color: #fde68a;
-}
-
-.vcu-launch-ok {
-  color: #86efac;
-}
-
-.vcu-launch-summary-grid {
+.vcu-launch-trigger-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 10px;
-  color: #aaa;
-  font-size: 13px;
 }
 
-.vcu-launch-summary-grid strong {
-  display: block;
-  margin-top: 4px;
-  color: #fff;
-}
-
-.vcu-launch-results-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 14px;
-}
-
-.vcu-launch-result-card {
-  padding: 14px;
-  background: #111;
+.vcu-launch-trigger-item {
+  padding: 12px;
   border: 1px solid #2a2a2a;
   border-radius: 8px;
+  background: #111;
+  color: #a1a1aa;
 }
 
-.vcu-launch-result-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 12px;
+.vcu-launch-trigger-item span {
+  display: block;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
-.vcu-launch-editor-grid {
+.vcu-launch-trigger-item strong {
+  display: block;
+  margin-top: 8px;
+  color: #fff;
+  font-size: 16px;
+}
+
+.vcu-launch-trigger-item.good {
+  border-color: #166534;
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.vcu-launch-trigger-item.bad {
+  border-color: #92400e;
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.vcu-launch-curve-grid {
   display: grid;
-  grid-template-columns: minmax(320px, 460px) minmax(280px, 1fr);
+  grid-template-columns: minmax(320px, 380px) minmax(320px, 1fr);
   gap: 18px;
 }
 
 .vcu-launch-editor-form {
   gap: 14px;
-}
-
-.vcu-launch-editor-meta {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.vcu-launch-curve-table,
-.vcu-launch-readback-table {
-  display: grid;
-  gap: 8px;
-}
-
-.vcu-launch-curve-head,
-.vcu-launch-curve-row {
-  display: grid;
-  grid-template-columns: 70px minmax(0, 1fr) minmax(0, 1fr);
-  gap: 10px;
-  align-items: center;
-}
-
-.vcu-launch-curve-head {
-  color: #888;
-  font-size: 12px;
-  text-transform: uppercase;
-}
-
-.vcu-launch-curve-row input,
-.vcu-launch-curve-row span {
-  min-height: 36px;
-  padding: 7px 10px;
-  border: 1px solid #333;
-  border-radius: 6px;
-  background: #1b1b1b;
-  color: #fff;
-}
-
-.vcu-launch-curve-row.readback span {
-  display: inline-flex;
-  align-items: center;
 }
 
 .vcu-launch-button-row {
@@ -147,25 +155,63 @@
   flex-wrap: wrap;
 }
 
-@media (max-width: 960px) {
-  .vcu-launch-editor-grid {
-    grid-template-columns: 1fr;
-  }
+.vcu-launch-preview-panel {
+  display: grid;
+  gap: 14px;
+}
 
-  .vcu-launch-editor-meta {
+.vcu-launch-chart-card {
+  padding: 14px;
+  background: #111;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+}
+
+.vcu-launch-chart {
+  width: 100%;
+  height: auto;
+}
+
+.vcu-launch-chart rect {
+  fill: #0d0d0d;
+  stroke: #262626;
+}
+
+.vcu-launch-guide-line,
+.vcu-launch-time-line {
+  stroke: #27272a;
+  stroke-width: 1;
+}
+
+.vcu-launch-guide-label,
+.vcu-launch-axis-label {
+  fill: #a1a1aa;
+  font-size: 11px;
+  font-family: 'Consolas', 'Monaco', monospace;
+}
+
+.vcu-launch-curve-line {
+  fill: none;
+  stroke: #f97316;
+  stroke-width: 3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.vcu-launch-chart-caption {
+  margin-top: 10px;
+  color: #a1a1aa;
+  font-size: 12px;
+}
+
+@media (max-width: 960px) {
+  .vcu-launch-curve-grid {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 700px) {
-  .vcu-launch-action-grid,
-  .vcu-launch-curve-head,
-  .vcu-launch-curve-row {
-    grid-template-columns: 1fr;
-  }
-
-  .vcu-launch-result-header {
-    align-items: flex-start;
+  .vcu-launch-button-row {
     flex-direction: column;
   }
 }

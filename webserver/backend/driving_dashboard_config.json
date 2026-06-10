@@ -1,13 +1,24 @@
 {
   "widgets": [
     {
-      "id": "w_mq0l26ir_pdonvb",
-      "signal_name": "HVC_Batt_Voltage_mV",
-      "source_dbc": "hvc.dbc",
+      "id": "w_mq4uczpy_uitko8",
+      "signal_name": "MOBO_BSE_PSI_Rear",
+      "source_dbc": "Baby_MOBO.dbc",
       "label": null,
       "display_type": "auto",
       "decimals": null,
-      "size": "medium"
+      "size": "medium",
+      "cluster_id": "cl_mq4udbts_d7p5sx"
+    },
+    {
+      "id": "w_mq4ud2qx_tsv5ga",
+      "signal_name": "VCU_BSE_PSI",
+      "source_dbc": "VCU.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium",
+      "cluster_id": "cl_mq4udbts_d7p5sx"
     },
     {
       "id": "w_mpxhrvp2_koo4te",
@@ -16,133 +27,18 @@
       "label": null,
       "display_type": "auto",
       "decimals": null,
-      "size": "medium"
+      "size": "medium",
+      "cluster_id": "cl_mq4uh59h_i8lnsx"
     },
     {
-      "id": "w_mq0jj3h2_1catpq",
-      "signal_name": "VCU_APPS_Value",
-      "source_dbc": "VCU.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mpz23t5u_2xb4ph",
-      "signal_name": "HVC_Current_High_mA",
-      "source_dbc": "hvc.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mpz2rfs8_zqw442",
-      "signal_name": "HVC_Current_Low_mA",
-      "source_dbc": "hvc.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mq1zadnc_ec8udj",
-      "signal_name": "INV_DC_Bus_Current",
+      "id": "w_mq7pd1iu_s5rgaw",
+      "signal_name": "HS_Torque_Feedback",
       "source_dbc": "BMS-Inverter-Only.dbc",
       "label": null,
       "display_type": "auto",
       "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mq1z5cwt_bmx83u",
-      "signal_name": "VCU_INV_Discharge_Current_Limit",
-      "source_dbc": "VCU.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mpxhxv9q_gk2u14",
-      "signal_name": "VCU_BSE_PSI",
-      "source_dbc": "VCU.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mpxhv7et_x49tnf",
-      "signal_name": "VCU_State",
-      "source_dbc": "VCU.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mpz239fs_sonyyv",
-      "signal_name": "MOBO_BSE_PSI_Rear",
-      "source_dbc": "Baby_MOBO.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mpxi00np_2m3nt4",
-      "signal_name": "INV_Torque_Feedback",
-      "source_dbc": "BMS-Inverter-Only.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mpz22pff_d2vbji",
-      "signal_name": "HVC_Acc_Temp_Max_C",
-      "source_dbc": "hvc.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mpz22u1k_23vqok",
-      "signal_name": "HVC_Acc_Temp_Min_C",
-      "source_dbc": "hvc.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mpz2309e_jj9fb2",
-      "signal_name": "MOBO_Battery_Voltage",
-      "source_dbc": "Baby_MOBO.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mpz23yz2_v6ae7i",
-      "signal_name": "HVC_Acc_Volt_Max_mV",
-      "source_dbc": "hvc.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mpz242y0_o0zpy7",
-      "signal_name": "HVC_Acc_Volt_Min_mV",
-      "source_dbc": "hvc.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
+      "size": "medium",
+      "cluster_id": "cl_mq4uh59h_i8lnsx"
     },
     {
       "id": "w_mpz25hbr_pqkbhq",
@@ -151,7 +47,8 @@
       "label": null,
       "display_type": "auto",
       "decimals": null,
-      "size": "medium"
+      "size": "medium",
+      "cluster_id": "cl_mq4uh59h_i8lnsx"
     },
     {
       "id": "w_mpz2g1h1_6a7vej",
@@ -160,7 +57,128 @@
       "label": null,
       "display_type": "auto",
       "decimals": null,
-      "size": "medium"
+      "size": "medium",
+      "cluster_id": "cl_mq4uh59h_i8lnsx"
+    },
+    {
+      "id": "w_mq1zadnc_ec8udj",
+      "signal_name": "INV_DC_Bus_Current",
+      "source_dbc": "BMS-Inverter-Only.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium",
+      "cluster_id": "cl_mq4uh59h_i8lnsx"
+    },
+    {
+      "id": "w_mpz22pff_d2vbji",
+      "signal_name": "HVC_Acc_Temp_Max_C",
+      "source_dbc": "hvc.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "small",
+      "cluster_id": "cl_mq4um3ez_uhy9qj"
+    },
+    {
+      "id": "w_mpz22u1k_23vqok",
+      "signal_name": "HVC_Acc_Temp_Min_C",
+      "source_dbc": "hvc.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "small",
+      "cluster_id": "cl_mq4um3ez_uhy9qj"
+    },
+    {
+      "id": "w_mpz23yz2_v6ae7i",
+      "signal_name": "HVC_Acc_Volt_Max_mV",
+      "source_dbc": "hvc.dbc",
+      "label": null,
+      "display_type": "number",
+      "decimals": null,
+      "size": "small",
+      "cluster_id": "cl_mq4um3ez_uhy9qj"
+    },
+    {
+      "id": "w_mpz242y0_o0zpy7",
+      "signal_name": "HVC_Acc_Volt_Min_mV",
+      "source_dbc": "hvc.dbc",
+      "label": null,
+      "display_type": "number",
+      "decimals": null,
+      "size": "small",
+      "cluster_id": "cl_mq4um3ez_uhy9qj"
+    },
+    {
+      "id": "w_mq7pfi0w_azd0in",
+      "signal_name": "HVC_Pack_Current_A",
+      "source_dbc": "hvc.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "small",
+      "cluster_id": "cl_mq4um3ez_uhy9qj"
+    },
+    {
+      "id": "w_mq4um8yo_fzdnx6",
+      "signal_name": "HVC_Pack_Power_kW",
+      "source_dbc": "hvc.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "small",
+      "cluster_id": "cl_mq4um3ez_uhy9qj"
+    },
+    {
+      "id": "w_mq4umg7n_hidmes",
+      "signal_name": "HVC_Peak_Pack_Power_kW",
+      "source_dbc": "hvc.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "small",
+      "cluster_id": "cl_mq4um3ez_uhy9qj"
+    },
+    {
+      "id": "w_mq0jj3h2_1catpq",
+      "signal_name": "VCU_APPS_Value",
+      "source_dbc": "VCU.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium",
+      "cluster_id": "cl_mq4umss6_omms08"
+    },
+    {
+      "id": "w_mpxhv7et_x49tnf",
+      "signal_name": "VCU_State",
+      "source_dbc": "VCU.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium",
+      "cluster_id": "cl_mq4umss6_omms08"
+    },
+    {
+      "id": "w_mq1z5cwt_bmx83u",
+      "signal_name": "VCU_INV_Discharge_Current_Limit",
+      "source_dbc": "VCU.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium",
+      "cluster_id": "cl_mq4umss6_omms08"
+    },
+    {
+      "id": "w_mpz2309e_jj9fb2",
+      "signal_name": "MOBO_Battery_Voltage",
+      "source_dbc": "Baby_MOBO.dbc",
+      "label": null,
+      "display_type": "auto",
+      "decimals": null,
+      "size": "medium",
+      "cluster_id": null
     },
     {
       "id": "w_mpz2g8mo_nnnsri",
@@ -169,7 +187,8 @@
       "label": null,
       "display_type": "auto",
       "decimals": null,
-      "size": "medium"
+      "size": "medium",
+      "cluster_id": null
     },
     {
       "id": "w_mpz2gei7_bc10f6",
@@ -178,7 +197,8 @@
       "label": null,
       "display_type": "auto",
       "decimals": null,
-      "size": "medium"
+      "size": "medium",
+      "cluster_id": null
     },
     {
       "id": "w_mpz2gnue_k0ue8k",
@@ -187,7 +207,8 @@
       "label": null,
       "display_type": "auto",
       "decimals": null,
-      "size": "medium"
+      "size": "medium",
+      "cluster_id": null
     },
     {
       "id": "w_mpz2hjcd_ptrpg1",
@@ -196,16 +217,8 @@
       "label": null,
       "display_type": "auto",
       "decimals": null,
-      "size": "medium"
-    },
-    {
-      "id": "w_mpz4xdm6_ibnfsx",
-      "signal_name": "Speed",
-      "source_dbc": "can9-database-01.09.dbc",
-      "label": null,
-      "display_type": "auto",
-      "decimals": null,
-      "size": "medium"
+      "size": "medium",
+      "cluster_id": null
     },
     {
       "id": "w_mq0jidyl_u240k8",
@@ -214,7 +227,8 @@
       "label": null,
       "display_type": "auto",
       "decimals": null,
-      "size": "medium"
+      "size": "medium",
+      "cluster_id": null
     },
     {
       "id": "w_mq2x5rz5_cr4cwp",
@@ -223,7 +237,30 @@
       "label": null,
       "display_type": "auto",
       "decimals": null,
-      "size": "medium"
+      "size": "medium",
+      "cluster_id": null
+    }
+  ],
+  "clusters": [
+    {
+      "id": "cl_mq4udbts_d7p5sx",
+      "name": "BRAKE",
+      "collapsed": true
+    },
+    {
+      "id": "cl_mq4uh59h_i8lnsx",
+      "name": "INV",
+      "collapsed": false
+    },
+    {
+      "id": "cl_mq4um3ez_uhy9qj",
+      "name": "HVC",
+      "collapsed": false
+    },
+    {
+      "id": "cl_mq4umss6_omms08",
+      "name": "VCU",
+      "collapsed": false
     }
   ]
 }

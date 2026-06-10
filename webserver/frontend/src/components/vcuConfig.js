@@ -15,7 +15,6 @@ const bitValue = (signal) => {
 };
 
 export const SET_VCU_CONFIG_ID = 0x800000CF;
-export const LAUNCH_CURVE_POINT_INDICES = [0, 1, 2, 3, 4];
 
 export const clampNumber = (value, min, max, fallback = min) => {
   const numeric = Number(value);
@@ -58,24 +57,10 @@ export const createDefaultVcuConfig = () => ({
   regenMaxAppsPct: 100,
   regenRyderMu: 0,
   regenStrategy: 0,
-  launchEnabled: false,
-  launchEndRpm: 0,
-  launchTimeoutMs: 0,
-  launchMaxSlip: 1,
-  launchBestCurve: 0,
-  launchActiveCurve: 3,
-  launchRecommendedSlip: 1,
-  launchActualRpm0: 0,
-  launchActualRpm1: 1000,
-  launchActualRpm2: 2000,
-  launchActualRpm3: 4000,
-  launchActualRpm4: 6000,
-  launchActualTorque0: 40,
-  launchActualTorque1: 50,
-  launchActualTorque2: 65,
-  launchActualTorque3: 80,
-  launchActualTorque4: 90,
-  trcCommand: 0,
+  launchTorqueOfftheline: 100,
+  launchTorqueInit: 150,
+  launchTorqueFinal: 183,
+  launchCommand: 0,
 });
 
 export const getVcuConfigFromSignals = (getSignal) => ({
@@ -113,24 +98,10 @@ export const getVcuConfigFromSignals = (getSignal) => ({
   regenMaxAppsPct: getNumeric(getSignal('VCU_Regen_Max_APPS')) ?? 100,
   regenRyderMu: getNumeric(getSignal('VCU_Regen_Ryder_Mu')) ?? 0,
   regenStrategy: getNumeric(getSignal('VCU_Regen_Strategy')) ?? 0,
-  launchEnabled: bitValue(getSignal('VCU_Launch_Enabled')) ?? false,
-  launchEndRpm: getNumeric(getSignal('VCU_Launch_End_RPM')) ?? 0,
-  launchTimeoutMs: getNumeric(getSignal('VCU_Launch_Timeout_ms')) ?? 0,
-  launchMaxSlip: getNumeric(getSignal('VCU_Launch_Max_Slip')) ?? 1,
-  launchBestCurve: getNumeric(getSignal('VCU_Launch_Best_Curve')) ?? 0,
-  launchActiveCurve: getNumeric(getSignal('VCU_Launch_Active_Curve')) ?? 3,
-  launchRecommendedSlip: getNumeric(getSignal('VCU_Launch_Recommended_Slip')) ?? 1,
-  launchActualRpm0: getNumeric(getSignal('VCU_Launch_Actual_RPM_0')) ?? 0,
-  launchActualRpm1: getNumeric(getSignal('VCU_Launch_Actual_RPM_1')) ?? 1000,
-  launchActualRpm2: getNumeric(getSignal('VCU_Launch_Actual_RPM_2')) ?? 2000,
-  launchActualRpm3: getNumeric(getSignal('VCU_Launch_Actual_RPM_3')) ?? 4000,
-  launchActualRpm4: getNumeric(getSignal('VCU_Launch_Actual_RPM_4')) ?? 6000,
-  launchActualTorque0: getNumeric(getSignal('VCU_Launch_Actual_Torque_0')) ?? 40,
-  launchActualTorque1: getNumeric(getSignal('VCU_Launch_Actual_Torque_1')) ?? 50,
-  launchActualTorque2: getNumeric(getSignal('VCU_Launch_Actual_Torque_2')) ?? 65,
-  launchActualTorque3: getNumeric(getSignal('VCU_Launch_Actual_Torque_3')) ?? 80,
-  launchActualTorque4: getNumeric(getSignal('VCU_Launch_Actual_Torque_4')) ?? 90,
-  trcCommand: 0,
+  launchTorqueOfftheline: getNumeric(getSignal('VCU_Launch_Torque_Offtheline')) ?? 100,
+  launchTorqueInit: getNumeric(getSignal('VCU_Launch_Torque_Init')) ?? 150,
+  launchTorqueFinal: getNumeric(getSignal('VCU_Launch_Torque_Final')) ?? 183,
+  launchCommand: 0,
 });
 
 export const buildVcuConfigFrame = (mux, config) => {
@@ -194,7 +165,10 @@ export const buildVcuConfigFrame = (mux, config) => {
   if (mux === 39) bytes[1] = config.regenSocGateEnabled ? 1 : 0;
   if (mux === 40) view.setUint16(1, Math.round(clampNumber(config.regenMaxAppsPct, 0, 100, 100)), true);
   if (mux === 41) view.setUint16(1, Math.round(clampNumber(config.regenRyderMu, 0, 10, 0) * 1000), true);
-  if (mux === 240) view.setUint16(1, Math.round(clampNumber(config.trcCommand, 0, 9, 0)), true);
+  if (mux === 42) view.setUint16(1, Math.round(clampNumber(config.launchTorqueOfftheline, 0, 230, 100)), true);
+  if (mux === 43) view.setUint16(1, Math.round(clampNumber(config.launchTorqueInit, 0, 230, 150)), true);
+  if (mux === 44) view.setUint16(1, Math.round(clampNumber(config.launchTorqueFinal, 0, 230, 183)), true);
+  if (mux === 240) view.setInt16(1, Math.round(clampNumber(config.launchCommand, 0, 2, 0)), true);
 
   return Array.from(bytes);
 };

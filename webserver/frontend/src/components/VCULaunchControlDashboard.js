@@ -1,14 +1,14 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Activity, AlertTriangle, Gauge, Settings, SlidersHorizontal, Zap,
+  Activity, AlertTriangle, Gauge, SlidersHorizontal, Zap,
 } from 'lucide-react';
 import {
   useNowTick, isTimestampStale, messageFreshnessTimestamp,
 } from '../hooks/useStaleness';
 import {
-  LAUNCH_CURVE_POINT_INDICES,
   SET_VCU_CONFIG_ID,
   buildVcuConfigFrame,
+  clampNumber,
   createDefaultVcuConfig,
   getVcuConfigFromSignals,
 } from './vcuConfig';
@@ -16,86 +16,52 @@ import './VCUDashboard.css';
 import './VCULaunchControlDashboard.css';
 
 const LAUNCH_FRAME_SIGNALS = {
-  VCU_TRC_State: [
-    'VCU_TRC_State_Machine',
-    'VCU_TRC_Current_Run',
-    'VCU_TRC_Selected_Curve',
-    'VCU_TRC_Learning_Active',
-    'VCU_TRC_Launch_Mode_Active',
-    'VCU_TRC_Best_Curve',
-    'VCU_TRC_Grip_Score_A',
-    'VCU_TRC_Grip_Score_B',
-    'VCU_TRC_Recommended_Slip',
-  ],
-  VCU_TRC_Run_Data: [
-    'VCU_TRC_Run_Index',
-    'VCU_TRC_Run_Valid',
-    'VCU_TRC_Run_Avg_Slip',
-    'VCU_TRC_Run_Peak_Slip',
-    'VCU_TRC_Run_Grip_Score',
+  VCU_Launch_State: [
+    'VCU_Launch_State_Machine',
+    'VCU_Launch_Armed',
+    'VCU_Launch_Active',
+    'VCU_Launch_Elapsed_ms',
+    'VCU_Launch_Curve_Torque',
   ],
   VCU_Config: [
-    'VCU_Launch_Enabled',
-    'VCU_Launch_End_RPM',
-    'VCU_Launch_Timeout_ms',
-    'VCU_Launch_Max_Slip',
-    'VCU_Launch_Best_Curve',
-    'VCU_Launch_Active_Curve',
-    'VCU_Launch_Recommended_Slip',
-    'VCU_Launch_Actual_RPM_0',
-    'VCU_Launch_Actual_RPM_1',
-    'VCU_Launch_Actual_RPM_2',
-    'VCU_Launch_Actual_RPM_3',
-    'VCU_Launch_Actual_RPM_4',
-    'VCU_Launch_Actual_Torque_0',
-    'VCU_Launch_Actual_Torque_1',
-    'VCU_Launch_Actual_Torque_2',
-    'VCU_Launch_Actual_Torque_3',
-    'VCU_Launch_Actual_Torque_4',
+    'VCU_Launch_Torque_Offtheline',
+    'VCU_Launch_Torque_Init',
+    'VCU_Launch_Torque_Final',
+  ],
+  VCU_APPS_Values: [
+    'VCU_APPS_Value',
+    'VCU_APPS_Valid',
+    'VCU_APPS_Implausible',
+  ],
+  VCU_BSE: [
+    'VCU_BSE_PSI',
+    'VCU_BSE_Valid',
+  ],
+  VCU_Summary: [
+    'VCU_State',
   ],
 };
 
 const LAUNCH_SIGNAL_NAMES = new Set(Object.values(LAUNCH_FRAME_SIGNALS).flat());
-const RUN_INDICES = [1, 2, 3];
-
-const TRC_STATE_LABELS = {
-  0: 'OFF',
-  1: 'ACTIVE',
-  2: 'LAUNCH_IDLE',
-  3: 'LAUNCH',
-  4: 'LEARNING_IDLE',
-  5: 'LEARNING_READY_RUN1',
-  6: 'LEARNING_RUNNING_RUN1',
-  7: 'LEARNING_COMPLETE_RUN1',
-  8: 'LEARNING_READY_RUN2',
-  9: 'LEARNING_RUNNING_RUN2',
-  10: 'LEARNING_COMPLETE_RUN2',
-  11: 'LEARNING_READY_RUN3',
-  12: 'LEARNING_RUNNING_RUN3',
-  13: 'LEARNING_PROCESSING',
-  14: 'LEARNING_RESULTS_READY',
-  15: 'LEARNING_ABORTED',
-  16: 'FAULT',
+const LAUNCH_STATE_LABELS = {
+  0: 'DISARMED',
+  1: 'ARMED',
+  2: 'LAUNCHING',
 };
-
-const CURVE_LABELS = {
-  0: 'CURVE_A',
-  1: 'CURVE_B',
-  2: 'CURVE_C',
-  3: 'UPLOADED',
+const VCU_STATE_LABELS = {
+  0: 'LOADING',
+  1: 'NOT READY',
+  2: 'PLAYING RTD SOUND',
+  3: 'DRIVING',
+  4: 'BAP FAULT',
+  5: 'HARD FAULT',
 };
-
 const BOOLEAN_LABELS = { 0: 'FALSE', 1: 'TRUE' };
-
-const TRC_COMMANDS = {
-  ENTER_LEARNING: 3,
-  ARM: 4,
-  ABORT: 5,
-  EXIT_LEARNING: 6,
-  ENTER_LAUNCH: 7,
-  ARM_LAUNCH: 8,
-  EXIT_LAUNCH: 9,
+const LAUNCH_COMMANDS = {
+  ARM: 1,
+  DISARM: 2,
 };
+const BRAKE_RELEASED_THRESHOLD_PSI = 1;
 
 const getNumeric = (signal) => {
   if (signal === undefined || signal === null) return null;
@@ -114,14 +80,14 @@ const getDisplay = (signal, fallback = '--', decimals = null) => {
     const { value, raw, unit } = signal;
     if (typeof value === 'string') return value;
     if (typeof value === 'number') {
-      const precision = decimals !== null ? decimals : (Number.isInteger(value) ? 0 : 3);
+      const precision = decimals !== null ? decimals : (Number.isInteger(value) ? 0 : 2);
       return `${value.toFixed(precision)}${unit ? ` ${unit}` : ''}`;
     }
     if (typeof raw === 'number') return String(raw);
     return fallback;
   }
   if (typeof signal === 'number') {
-    const precision = decimals !== null ? decimals : (Number.isInteger(signal) ? 0 : 3);
+    const precision = decimals !== null ? decimals : (Number.isInteger(signal) ? 0 : 2);
     return signal.toFixed(precision);
   }
   return String(signal);
@@ -172,29 +138,77 @@ const getCanonicalFrameName = (decoded) => {
 };
 
 const createLaunchDraft = (config) => ({
-  launchEnabled: config.launchEnabled,
-  launchEndRpm: config.launchEndRpm,
-  launchTimeoutMs: config.launchTimeoutMs,
-  launchMaxSlip: config.launchMaxSlip,
-  launchActiveCurve: config.launchActiveCurve,
-  launchActualRpm0: config.launchActualRpm0,
-  launchActualRpm1: config.launchActualRpm1,
-  launchActualRpm2: config.launchActualRpm2,
-  launchActualRpm3: config.launchActualRpm3,
-  launchActualRpm4: config.launchActualRpm4,
-  launchActualTorque0: config.launchActualTorque0,
-  launchActualTorque1: config.launchActualTorque1,
-  launchActualTorque2: config.launchActualTorque2,
-  launchActualTorque3: config.launchActualTorque3,
-  launchActualTorque4: config.launchActualTorque4,
+  launchTorqueOfftheline: config.launchTorqueOfftheline,
+  launchTorqueInit: config.launchTorqueInit,
+  launchTorqueFinal: config.launchTorqueFinal,
 });
 
-const formatRatio = (signalOrNumber) => {
-  const numeric = getNumeric(signalOrNumber);
-  return numeric === null ? '--' : numeric.toFixed(3);
+const buildLaunchCurveSamples = (draft) => {
+  const offtheline = clampNumber(draft.launchTorqueOfftheline, 0, 230, 100);
+  const init = clampNumber(draft.launchTorqueInit, 0, 230, 150);
+  const final = clampNumber(draft.launchTorqueFinal, 0, 230, 183);
+  const samples = [];
+
+  for (let step = 0; step <= 30; step += 1) {
+    const time = step / 10;
+    let torque = final;
+
+    if (time < 0.2) {
+      torque = offtheline;
+    } else if (time <= 3) {
+      torque = init + ((time * time) * (final - init)) / 9;
+    }
+
+    samples.push({ time, torque });
+  }
+
+  return { offtheline, init, final, samples };
 };
 
-const roundedInt = (value) => Math.round(Number(value) || 0);
+const buildCurvePreview = (draft) => {
+  const width = 360;
+  const height = 170;
+  const padding = { top: 16, right: 18, bottom: 28, left: 28 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const { offtheline, init, final, samples } = buildLaunchCurveSamples(draft);
+  const maxTorque = Math.max(120, offtheline, init, final);
+
+  const polyline = samples.map(({ time, torque }) => {
+    const x = padding.left + (time / 3) * plotWidth;
+    const y = padding.top + plotHeight - (torque / maxTorque) * plotHeight;
+    return `${x},${y}`;
+  }).join(' ');
+
+  const guideValues = Array.from(new Set([offtheline, init, final]))
+    .sort((left, right) => right - left);
+
+  return {
+    width,
+    height,
+    padding,
+    plotWidth,
+    plotHeight,
+    maxTorque,
+    polyline,
+    guideValues,
+  };
+};
+
+const formatElapsed = (elapsedMs) => {
+  if (elapsedMs === null) return '--';
+  return `${(elapsedMs / 1000).toFixed(2)} s`;
+};
+
+const readinessClass = (value) => {
+  if (value === null) return 'unknown';
+  return value ? 'good' : 'bad';
+};
+
+const readinessText = (value, readyLabel, waitingLabel) => {
+  if (value === null) return '--';
+  return value ? readyLabel : waitingLabel;
+};
 
 function Freshness({ timestamp, nowMs, staleTimeoutMs }) {
   return (
@@ -208,7 +222,6 @@ function VCULaunchControlDashboard({
   messages,
   dbcFiles = [],
   onSendMessage,
-  onRegisterRawCallback,
   staleTimeoutMs = 30000,
 }) {
   const nowMs = useNowTick(1000);
@@ -217,7 +230,6 @@ function VCULaunchControlDashboard({
   const [busyAction, setBusyAction] = useState(null);
   const [launchDraft, setLaunchDraft] = useState(() => createLaunchDraft(createDefaultVcuConfig()));
   const [draftDirty, setDraftDirty] = useState(false);
-  const [runData, setRunData] = useState({ 1: null, 2: null, 3: null });
 
   const enabledDbcCount = dbcFiles.filter((file) => file.enabled).length;
 
@@ -227,16 +239,16 @@ function VCULaunchControlDashboard({
     let latestMatchedSourceDbc = null;
     let latestMatchedTimestamp = -1;
 
-    messages.forEach((msg) => {
-      const decoded = msg?.decoded;
+    messages.forEach((message) => {
+      const decoded = message?.decoded;
       if (!decoded?.signals) return;
 
       const frameName = getCanonicalFrameName(decoded);
       const signalEntries = Object.entries(decoded.signals).filter(([signalName]) => LAUNCH_SIGNAL_NAMES.has(signalName));
       if (!frameName && signalEntries.length === 0) return;
 
-      const timestamp = messageFreshnessTimestamp(msg)
-        ?? (typeof msg.timestamp === 'number' ? msg.timestamp : 0);
+      const timestamp = messageFreshnessTimestamp(message)
+        ?? (typeof message.timestamp === 'number' ? message.timestamp : 0);
 
       if (frameName && (!frameMap[frameName] || timestamp >= frameMap[frameName].timestamp)) {
         frameMap[frameName] = { signals: decoded.signals, timestamp };
@@ -258,10 +270,14 @@ function VCULaunchControlDashboard({
     return { frames: frameMap, latestSignals: signalMap, matchedSourceDbc: latestMatchedSourceDbc };
   }, [messages]);
 
-  const getSignal = useCallback((name) => latestSignals.get(name)?.signal, [latestSignals]);
-
-  const launchReadback = useMemo(() => getVcuConfigFromSignals(getSignal), [getSignal]);
-  const draftSourceKey = useMemo(() => JSON.stringify(createLaunchDraft(launchReadback)), [launchReadback]);
+  const launchReadback = useMemo(
+    () => getVcuConfigFromSignals((name) => latestSignals.get(name)?.signal),
+    [latestSignals],
+  );
+  const draftSourceKey = useMemo(
+    () => JSON.stringify(createLaunchDraft(launchReadback)),
+    [launchReadback],
+  );
 
   useEffect(() => {
     if (!draftDirty) {
@@ -269,61 +285,30 @@ function VCULaunchControlDashboard({
     }
   }, [draftDirty, draftSourceKey, launchReadback]);
 
-  const processRawMessage = useCallback((message) => {
-    const decoded = message?.decoded;
-    if (!decoded?.signals) return;
-    if (decoded.message_name !== 'VCU_TRC_Run_Data' && decoded.signals.VCU_TRC_Run_Index === undefined) return;
-
-    const runIndex = getNumeric(decoded.signals.VCU_TRC_Run_Index);
-    if (!RUN_INDICES.includes(runIndex)) return;
-
-    const timestamp = messageFreshnessTimestamp(message)
-      ?? (typeof message.timestamp === 'number' ? message.timestamp : 0);
-
-    setRunData((previous) => ({
-      ...previous,
-      [runIndex]: {
-        signals: decoded.signals,
-        timestamp,
-      },
-    }));
-  }, []);
-
-  useEffect(() => {
-    if (!onRegisterRawCallback) return undefined;
-    return onRegisterRawCallback(processRawMessage);
-  }, [onRegisterRawCallback, processRawMessage]);
-
-  const trcState = getNumeric(getSignal('VCU_TRC_State_Machine'));
-  const currentRun = getNumeric(getSignal('VCU_TRC_Current_Run'));
-  const selectedCurve = getSignal('VCU_TRC_Selected_Curve');
-  const bestCurve = getSignal('VCU_TRC_Best_Curve') || getSignal('VCU_Launch_Best_Curve');
-  const recommendedSlip = getSignal('VCU_TRC_Recommended_Slip') || getSignal('VCU_Launch_Recommended_Slip');
-  const learningActive = bitValue(getSignal('VCU_TRC_Learning_Active')) ?? false;
-  const launchModeActive = bitValue(getSignal('VCU_TRC_Launch_Mode_Active')) ?? false;
-  const usingUploadedCurve = Number(launchDraft.launchActiveCurve) === 3;
+  const getSignal = (name) => latestSignals.get(name)?.signal;
+  const stateMachine = getNumeric(getSignal('VCU_Launch_State_Machine'));
+  const launchArmed = bitValue(getSignal('VCU_Launch_Armed'));
+  const launchActive = bitValue(getSignal('VCU_Launch_Active'));
+  const elapsedMs = getNumeric(getSignal('VCU_Launch_Elapsed_ms'));
+  const curveTorque = getNumeric(getSignal('VCU_Launch_Curve_Torque'));
+  const appsPct = getNumeric(getSignal('VCU_APPS_Value'));
+  const appsValid = bitValue(getSignal('VCU_APPS_Valid'));
+  const appsImplausible = bitValue(getSignal('VCU_APPS_Implausible'));
+  const bsePsi = getNumeric(getSignal('VCU_BSE_PSI'));
+  const bseValid = bitValue(getSignal('VCU_BSE_Valid'));
+  const vcuState = getNumeric(getSignal('VCU_State'));
   const hasAnyData = latestSignals.size > 0;
-
-  const rpmValues = LAUNCH_CURVE_POINT_INDICES.map((index) => Number(launchDraft[`launchActualRpm${index}`]));
-  const rpmMonotonic = rpmValues.every((value, index) => index === 0 || value >= rpmValues[index - 1]);
-
-  const uploadedCurveReadbackReady = LAUNCH_CURVE_POINT_INDICES.every((index) => (
-    getSignal(`VCU_Launch_Actual_RPM_${index}`) !== undefined
-    && getSignal(`VCU_Launch_Actual_Torque_${index}`) !== undefined
-  ));
-
-  const uploadedCurveMatches = uploadedCurveReadbackReady && LAUNCH_CURVE_POINT_INDICES.every((index) => (
-    roundedInt(getNumeric(getSignal(`VCU_Launch_Actual_RPM_${index}`))) === roundedInt(launchDraft[`launchActualRpm${index}`])
-    && roundedInt(getNumeric(getSignal(`VCU_Launch_Actual_Torque_${index}`))) === roundedInt(launchDraft[`launchActualTorque${index}`])
-  ));
-
-  const canEnterLearning = (trcState === 0 || trcState === 1 || trcState === null) && !learningActive && !launchModeActive;
-  const canArmLearning = [4, 7, 10].includes(trcState);
-  const canEnterLaunch = (trcState === 0 || trcState === 1 || trcState === null) && !learningActive && !launchModeActive && launchReadback.launchEnabled;
-  const canArmLaunch = trcState === 2 && (!usingUploadedCurve || uploadedCurveMatches);
-  const canAbort = launchModeActive || learningActive || [3, 6, 9, 12].includes(trcState);
-  const canExitLearning = learningActive || (trcState !== null && trcState >= 4 && trcState <= 15);
-  const canExitLaunch = launchModeActive || trcState === 2 || trcState === 3;
+  const launchStateTimestamp = frames.VCU_Launch_State?.timestamp;
+  const launchTelemetryFresh = Boolean(launchStateTimestamp)
+    && !isTimestampStale(launchStateTimestamp, nowMs, staleTimeoutMs);
+  const brakesReleased = bsePsi === null ? null : bsePsi <= BRAKE_RELEASED_THRESHOLD_PSI;
+  const throttleReady = appsPct === null ? null : appsPct >= 25;
+  const drivingReady = vcuState === null ? null : vcuState === 3;
+  const canArm = typeof onSendMessage === 'function'
+    && busyAction === null
+    && launchTelemetryFresh
+    && stateMachine === 0;
+  const canDisarm = typeof onSendMessage === 'function' && busyAction === null;
 
   const dbcStatusText = matchedSourceDbc
     ? `Matched ${matchedSourceDbc}`
@@ -331,12 +316,14 @@ function VCULaunchControlDashboard({
       ? 'Waiting for launch-control signals'
       : 'No DBC enabled';
 
-  const patchLaunchDraft = (patch) => {
+  const curvePreview = useMemo(() => buildCurvePreview(launchDraft), [launchDraft]);
+
+  const patchDraft = (field, value) => {
     setDraftDirty(true);
-    setLaunchDraft((previous) => ({ ...previous, ...patch }));
+    setLaunchDraft((previous) => ({ ...previous, [field]: value }));
   };
 
-  const sendCommand = async (commandValue, label) => {
+  const sendLaunchCommand = async (launchCommand, label) => {
     if (typeof onSendMessage !== 'function') {
       setCommandStatus({ type: 'error', text: 'Send unavailable' });
       return;
@@ -348,7 +335,7 @@ function VCULaunchControlDashboard({
     try {
       const ok = await onSendMessage(
         SET_VCU_CONFIG_ID,
-        buildVcuConfigFrame(240, { trcCommand: commandValue }),
+        buildVcuConfigFrame(240, { launchCommand }),
         true,
         false,
       );
@@ -362,39 +349,47 @@ function VCULaunchControlDashboard({
     }
   };
 
-  const saveLaunchConfig = async () => {
+  const applyTorqueSettings = async () => {
     if (typeof onSendMessage !== 'function') {
       setSaveStatus({ type: 'error', text: 'Send unavailable' });
       return;
     }
-    if (!rpmMonotonic) {
-      setSaveStatus({ type: 'error', text: 'RPM breakpoints must be monotonic.' });
-      return;
-    }
 
-    const muxes = [22, 23, 24, 25, 27, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38];
-    setBusyAction('save-launch-config');
-    setSaveStatus({ type: 'pending', text: 'Saving launch config...' });
+    const writes = [
+      [42, 'launchTorqueOfftheline'],
+      [43, 'launchTorqueInit'],
+      [44, 'launchTorqueFinal'],
+    ];
+
+    setBusyAction('apply-torque');
+    setSaveStatus({ type: 'pending', text: 'Applying launch torque settings...' });
 
     try {
-      for (const mux of muxes) {
-        const ok = await onSendMessage(SET_VCU_CONFIG_ID, buildVcuConfigFrame(mux, launchDraft), true, false);
+      for (const [mux, field] of writes) {
+        const ok = await onSendMessage(
+          SET_VCU_CONFIG_ID,
+          buildVcuConfigFrame(mux, { [field]: launchDraft[field] }),
+          true,
+          false,
+        );
         if (!ok) {
           throw new Error(`VCU rejected mux ${mux}`);
         }
       }
+
       setDraftDirty(false);
-      setSaveStatus({ type: 'success', text: 'Launch config sent. Verify readback below.' });
+      setSaveStatus({ type: 'success', text: 'Launch torque settings sent. Reload from VCU to confirm readback.' });
     } catch (error) {
-      setSaveStatus({ type: 'error', text: `Save failed: ${error?.message || error}` });
+      setSaveStatus({ type: 'error', text: `Apply failed: ${error?.message || error}` });
     } finally {
       setBusyAction(null);
     }
   };
 
-  const resetDraftToReadback = () => {
+  const reloadFromVcu = () => {
     setLaunchDraft(createLaunchDraft(launchReadback));
     setDraftDirty(false);
+    setSaveStatus(null);
   };
 
   return (
@@ -402,7 +397,7 @@ function VCULaunchControlDashboard({
       <div className="vcu-header">
         <div>
           <h2><Gauge size={22} /> Launch Control</h2>
-          <p>Learning mode, actual launch control, and uploaded launch-curve management for VCU TRC.</p>
+          <p>Arm or abort the VCU launch system, monitor live trigger status, and tune the three torque set-points.</p>
         </div>
         <div className="vcu-header-actions">
           <span className={`vcu-dbc-pill ${matchedSourceDbc ? 'enabled' : 'disabled'}`}>
@@ -414,14 +409,14 @@ function VCULaunchControlDashboard({
       </div>
 
       <div className="vcu-notice">
-        Launch control is independent from standard traction control enable. Use VCU TRC state and VCU Config readback as the source of truth.
+        0.0-0.2 s uses off-the-line torque, then the VCU follows a quadratic ramp from init torque to final torque at 3.0 s. Output torque is still bounded by the driver pedal request.
       </div>
 
       {!matchedSourceDbc && (
         <div className="vcu-notice">
           {enabledDbcCount > 0
-            ? 'Waiting for decoded VCU launch-control signals from an enabled DBC.'
-            : 'Enable a DBC that exposes VCU launch-control signals to populate this page.'}
+            ? 'Waiting for decoded VCU launch-control frames from an enabled DBC.'
+            : 'Enable a DBC that exposes VCU launch-control messages to populate this page.'}
         </div>
       )}
 
@@ -430,194 +425,218 @@ function VCULaunchControlDashboard({
           <AlertTriangle size={28} />
           <div>
             <h3>No launch-control frames received yet</h3>
-            <p>Connect to CAN and enable a DBC that contains the VCU launch-control messages.</p>
+            <p>Connect to CAN and enable a DBC that contains the new VCU launch state and config signals.</p>
           </div>
         </div>
       )}
 
-      <div className="vcu-kpi-grid">
+      <div className="vcu-kpi-grid vcu-launch-top-grid">
         <section className="vcu-card">
-          <div className="vcu-card-header"><Activity size={18} /><h3>TRC State</h3><Freshness timestamp={frames.VCU_TRC_State?.timestamp} nowMs={nowMs} staleTimeoutMs={staleTimeoutMs} /></div>
-          <div className={`vcu-state state-${trcState ?? 'unknown'}`}>{trcState !== null ? TRC_STATE_LABELS[trcState] || trcState : '--'}</div>
-          <div className="vcu-inline-values">
-            <span>Current run <strong>{currentRun || '--'}</strong></span>
-            <span>Selected curve <strong>{enumLabel(selectedCurve, CURVE_LABELS)}</strong></span>
-            <span>Best curve <strong>{enumLabel(bestCurve, CURVE_LABELS)}</strong></span>
-            <span>Recommended slip <strong>{formatRatio(recommendedSlip)}</strong></span>
+          <div className="vcu-card-header">
+            <Activity size={18} />
+            <h3>Live Status</h3>
+            <Freshness timestamp={frames.VCU_Launch_State?.timestamp} nowMs={nowMs} staleTimeoutMs={staleTimeoutMs} />
           </div>
+
+          <div className={`vcu-launch-state-chip state-${stateMachine ?? 'unknown'}`}>
+            {stateMachine !== null ? LAUNCH_STATE_LABELS[stateMachine] || stateMachine : '--'}
+          </div>
+
           <div className="vcu-pill-row">
-            <span className={`vcu-pill ${learningActive ? 'good' : 'unknown'}`}>Learning: {learningActive ? 'ACTIVE' : 'INACTIVE'}</span>
-            <span className={`vcu-pill ${launchModeActive ? 'good' : 'unknown'}`}>Launch mode: {launchModeActive ? 'ACTIVE' : 'INACTIVE'}</span>
-            <span className={`vcu-pill ${trcState === 3 ? 'good' : 'unknown'}`}>Launch armed/live: {trcState === 3 ? 'YES' : 'NO'}</span>
+            <span className={`vcu-pill ${launchArmed ? 'good' : 'unknown'}`}>Armed: {readinessText(launchArmed, 'YES', 'NO')}</span>
+            <span className={`vcu-pill ${launchActive ? 'good' : 'unknown'}`}>Active: {readinessText(launchActive, 'YES', 'NO')}</span>
+            <span className={`vcu-pill ${launchTelemetryFresh ? 'good' : 'bad'}`}>Telemetry: {launchTelemetryFresh ? 'FRESH' : 'STALE'}</span>
           </div>
+
+          <div className="vcu-gauge-row">
+            <div className="vcu-gauge-meta">
+              <span>Curve torque</span>
+            </div>
+            <div className="vcu-gauge-track">
+              <div className="vcu-gauge-fill" style={{ width: `${clampNumber(curveTorque ?? 0, 0, 230, 0) / 230 * 100}%` }} />
+            </div>
+            <strong>{curveTorque !== null ? `${Math.round(curveTorque)} Nm` : '--'}</strong>
+          </div>
+
+          <div className="vcu-gauge-row">
+            <div className="vcu-gauge-meta">
+              <span>Pedal (APPS)</span>
+            </div>
+            <div className="vcu-gauge-track">
+              <div className="vcu-gauge-fill" style={{ width: `${clampNumber(appsPct ?? 0, 0, 100, 0)}%` }} />
+            </div>
+            <strong>{appsPct !== null ? `${appsPct.toFixed(1)} %` : '--'}</strong>
+          </div>
+
+          <div className="vcu-launch-live-grid">
+            <span>Elapsed <strong>{formatElapsed(elapsedMs)}</strong></span>
+            <span>Brake pressure <strong>{bsePsi !== null ? `${bsePsi.toFixed(1)} PSI` : '--'}</strong></span>
+            <span>VCU state <strong>{enumLabel(getSignal('VCU_State'), VCU_STATE_LABELS)}</strong></span>
+            <span>APPS valid <strong>{enumLabel(getSignal('VCU_APPS_Valid'), BOOLEAN_LABELS)}</strong></span>
+          </div>
+
+          {stateMachine === 1 && (
+            <div className="vcu-launch-armed-note">
+              Waiting for trigger: brake pressure {'<='} 1 PSI, throttle {'>'} 25%, and VCU state = DRIVING.
+            </div>
+          )}
         </section>
 
         <section className="vcu-card">
-          <div className="vcu-card-header"><Zap size={18} /><h3>Learning Summary</h3></div>
-          <div className="vcu-launch-summary-grid">
-            <span>Grip score A <strong>{formatRatio(getSignal('VCU_TRC_Grip_Score_A'))}</strong></span>
-            <span>Grip score B <strong>{formatRatio(getSignal('VCU_TRC_Grip_Score_B'))}</strong></span>
-            <span>Launch enabled <strong>{enumLabel(getSignal('VCU_Launch_Enabled'), BOOLEAN_LABELS)}</strong></span>
-            <span>Active curve source <strong>{enumLabel(getSignal('VCU_Launch_Active_Curve'), CURVE_LABELS)}</strong></span>
+          <div className="vcu-card-header">
+            <Zap size={18} />
+            <h3>Arm / Abort</h3>
           </div>
-        </section>
-      </div>
 
-      <div className="vcu-section-grid vcu-launch-sections">
-        <section className="vcu-card">
-          <div className="vcu-card-header"><SlidersHorizontal size={18} /><h3>Learning Control</h3></div>
-          <p className="vcu-launch-copy">Use `ENTER_LEARNING`, then arm each run after the VCU returns to the next compatible learning state.</p>
-          <div className="vcu-launch-action-grid">
-            <button type="button" onClick={() => sendCommand(TRC_COMMANDS.ENTER_LEARNING, 'Enter Learning')} disabled={busyAction !== null || !canEnterLearning}>Enter Learning</button>
-            <button type="button" onClick={() => sendCommand(TRC_COMMANDS.ARM, 'Arm Next Learning Run')} disabled={busyAction !== null || !canArmLearning}>Arm Next Learning Run</button>
-            <button type="button" onClick={() => sendCommand(TRC_COMMANDS.ABORT, 'Abort')} disabled={busyAction !== null || !canAbort}>Abort</button>
-            <button type="button" onClick={() => sendCommand(TRC_COMMANDS.EXIT_LEARNING, 'Exit Learning')} disabled={busyAction !== null || !canExitLearning}>Exit Learning</button>
+          <div className="vcu-launch-action-stack">
+            <button
+              type="button"
+              className="vcu-launch-arm-button"
+              onClick={() => sendLaunchCommand(LAUNCH_COMMANDS.ARM, 'Arm launch')}
+              disabled={!canArm}
+            >
+              ARM LAUNCH
+            </button>
+            <button
+              type="button"
+              className="vcu-launch-disarm-button"
+              onClick={() => sendLaunchCommand(LAUNCH_COMMANDS.DISARM, 'Disarm launch')}
+              disabled={!canDisarm}
+            >
+              DISARM (ABORT)
+            </button>
           </div>
+
           <div className="vcu-launch-guardrails">
-            <span>Learning can be armed from `LEARNING_IDLE`, `LEARNING_COMPLETE_RUN1`, or `LEARNING_COMPLETE_RUN2`.</span>
-            <span>The run starts only after throttle crosses the VCU start threshold.</span>
+            <span>ARM is only enabled when fresh `VCU_Launch_State` telemetry shows `DISARMED`.</span>
+            <span>DISARM is always available as the software abort and forces the VCU back to `DISARMED`.</span>
+            <span>After each run the VCU auto-returns to `DISARMED`, so the next launch requires a fresh ARM command.</span>
           </div>
-        </section>
 
-        <section className="vcu-card">
-          <div className="vcu-card-header"><Gauge size={18} /><h3>Actual Launch Control</h3></div>
-          <p className="vcu-launch-copy">Use `ENTER_LAUNCH`, verify the selected curve source and uploaded readback, then arm launch.</p>
-          <div className="vcu-launch-action-grid">
-            <button type="button" onClick={() => sendCommand(TRC_COMMANDS.ENTER_LAUNCH, 'Enter Launch')} disabled={busyAction !== null || !canEnterLaunch}>Enter Launch</button>
-            <button type="button" onClick={() => sendCommand(TRC_COMMANDS.ARM_LAUNCH, 'Arm Launch')} disabled={busyAction !== null || !canArmLaunch}>Arm Launch</button>
-            <button type="button" onClick={() => sendCommand(TRC_COMMANDS.ABORT, 'Abort')} disabled={busyAction !== null || !canAbort}>Abort</button>
-            <button type="button" onClick={() => sendCommand(TRC_COMMANDS.EXIT_LAUNCH, 'Exit Launch')} disabled={busyAction !== null || !canExitLaunch}>Exit Launch</button>
-          </div>
-          <div className="vcu-launch-guardrails">
-            <span>Launch arming requires `LAUNCH_IDLE`.</span>
-            {usingUploadedCurve && (
-              <span className={uploadedCurveMatches ? 'vcu-launch-ok' : 'vcu-launch-warning'}>
-                Uploaded curve verification: {uploadedCurveMatches ? 'readback matches editor' : 'save and verify all 10 uploaded points before arming'}.
-              </span>
-            )}
+          <div className="vcu-launch-trigger-grid">
+            <div className={`vcu-launch-trigger-item ${readinessClass(brakesReleased)}`}>
+              <span>Brake release</span>
+              <strong>{readinessText(brakesReleased, 'READY', 'HOLDING')}</strong>
+            </div>
+            <div className={`vcu-launch-trigger-item ${readinessClass(throttleReady)}`}>
+              <span>Throttle > 25%</span>
+              <strong>{readinessText(throttleReady, 'READY', 'WAITING')}</strong>
+            </div>
+            <div className={`vcu-launch-trigger-item ${readinessClass(drivingReady)}`}>
+              <span>VCU = DRIVING</span>
+              <strong>{readinessText(drivingReady, 'READY', 'WAITING')}</strong>
+            </div>
+            <div className={`vcu-launch-trigger-item ${readinessClass(appsValid && !appsImplausible)}`}>
+              <span>APPS plausibility</span>
+              <strong>{readinessText(appsValid && !appsImplausible, 'VALID', 'CHECK')}</strong>
+            </div>
+            <div className={`vcu-launch-trigger-item ${readinessClass(bseValid)}`}>
+              <span>BSE validity</span>
+              <strong>{readinessText(bseValid, 'VALID', 'CHECK')}</strong>
+            </div>
           </div>
         </section>
       </div>
 
       <section className="vcu-card">
-        <div className="vcu-card-header"><Activity size={18} /><h3>Learning Results</h3><Freshness timestamp={frames.VCU_TRC_State?.timestamp} nowMs={nowMs} staleTimeoutMs={staleTimeoutMs} /></div>
-        <div className="vcu-launch-results-grid">
-          {RUN_INDICES.map((runIndex) => {
-            const run = runData[runIndex];
-            const signals = run?.signals || {};
-            return (
-              <div key={runIndex} className="vcu-launch-result-card">
-                <div className="vcu-launch-result-header">
-                  <strong>Run {runIndex}</strong>
-                  <Freshness timestamp={run?.timestamp} nowMs={nowMs} staleTimeoutMs={staleTimeoutMs} />
-                </div>
-                <div className="vcu-launch-summary-grid">
-                  <span>Valid <strong>{enumLabel(signals.VCU_TRC_Run_Valid, BOOLEAN_LABELS)}</strong></span>
-                  <span>Avg slip <strong>{formatRatio(signals.VCU_TRC_Run_Avg_Slip)}</strong></span>
-                  <span>Peak slip <strong>{formatRatio(signals.VCU_TRC_Run_Peak_Slip)}</strong></span>
-                  <span>Grip score <strong>{formatRatio(signals.VCU_TRC_Run_Grip_Score)}</strong></span>
-                </div>
-              </div>
-            );
-          })}
+        <div className="vcu-card-header">
+          <SlidersHorizontal size={18} />
+          <h3>Torque Curve</h3>
+          <Freshness timestamp={frames.VCU_Config?.timestamp} nowMs={nowMs} staleTimeoutMs={staleTimeoutMs} />
         </div>
-      </section>
 
-      <section className="vcu-card">
-        <div className="vcu-card-header"><Settings size={18} /><h3>Actual Launch Curve Editor</h3><Freshness timestamp={frames.VCU_Config?.timestamp} nowMs={nowMs} staleTimeoutMs={staleTimeoutMs} /></div>
-        <div className="vcu-launch-editor-grid">
+        <div className="vcu-launch-curve-grid">
           <div className="vcu-sender vcu-launch-editor-form">
             <div className="vcu-sender-header">
-              <span>Launch Config</span>
-              <strong>Readback is authoritative</strong>
+              <span>Stored Parameters</span>
+              <strong>Writes persist via muxes 42, 43, and 44</strong>
             </div>
 
-            <label className="vcu-checkbox">
-              <input type="checkbox" checked={Boolean(launchDraft.launchEnabled)} onChange={(event) => patchLaunchDraft({ launchEnabled: event.target.checked })} />
-              Launch enabled
+            <label>
+              Off-the-line torque (0-0.2 s)
+              <input
+                type="number"
+                min="0"
+                max="230"
+                step="1"
+                value={launchDraft.launchTorqueOfftheline}
+                onChange={(event) => patchDraft('launchTorqueOfftheline', event.target.value)}
+              />
             </label>
 
             <label>
-              Active curve source
-              <select value={launchDraft.launchActiveCurve} onChange={(event) => patchLaunchDraft({ launchActiveCurve: Number(event.target.value) })}>
-                <option value={0}>CURVE_A</option>
-                <option value={1}>CURVE_B</option>
-                <option value={2}>CURVE_C</option>
-                <option value={3}>UPLOADED</option>
-              </select>
+              Init torque (curve at t = 0)
+              <input
+                type="number"
+                min="0"
+                max="230"
+                step="1"
+                value={launchDraft.launchTorqueInit}
+                onChange={(event) => patchDraft('launchTorqueInit', event.target.value)}
+              />
             </label>
 
-            <div className="vcu-launch-editor-meta">
-              <label>
-                End RPM
-                <input type="number" min="0" max="32767" step="1" value={launchDraft.launchEndRpm} onChange={(event) => patchLaunchDraft({ launchEndRpm: event.target.value })} />
-              </label>
-              <label>
-                Timeout (ms)
-                <input type="number" min="0" max="60000" step="1" value={launchDraft.launchTimeoutMs} onChange={(event) => patchLaunchDraft({ launchTimeoutMs: event.target.value })} />
-              </label>
-              <label>
-                Max slip
-                <input type="number" min="1" max="5" step="0.001" value={launchDraft.launchMaxSlip} onChange={(event) => patchLaunchDraft({ launchMaxSlip: event.target.value })} />
-              </label>
-            </div>
-
-            <div className="vcu-launch-curve-table">
-              <div className="vcu-launch-curve-head">
-                <span>Point</span>
-                <span>RPM</span>
-                <span>Torque (Nm)</span>
-              </div>
-              {LAUNCH_CURVE_POINT_INDICES.map((index) => (
-                <div key={index} className="vcu-launch-curve-row">
-                  <strong>{index}</strong>
-                  <input type="number" min="0" max="32767" step="1" value={launchDraft[`launchActualRpm${index}`]} onChange={(event) => patchLaunchDraft({ [`launchActualRpm${index}`]: event.target.value })} />
-                  <input type="number" min="0" max="230" step="1" value={launchDraft[`launchActualTorque${index}`]} onChange={(event) => patchLaunchDraft({ [`launchActualTorque${index}`]: event.target.value })} />
-                </div>
-              ))}
-            </div>
-
-            {!rpmMonotonic && (
-              <div className="vcu-notice">RPM breakpoints must be monotonic non-decreasing before the curve can be written.</div>
-            )}
+            <label>
+              Final torque (curve at t = 3.0 s)
+              <input
+                type="number"
+                min="0"
+                max="230"
+                step="1"
+                value={launchDraft.launchTorqueFinal}
+                onChange={(event) => patchDraft('launchTorqueFinal', event.target.value)}
+              />
+            </label>
 
             <div className="vcu-launch-button-row">
-              <button type="button" onClick={saveLaunchConfig} disabled={busyAction !== null || !rpmMonotonic}>Save Launch Settings</button>
-              <button type="button" className="vcu-launch-secondary" onClick={resetDraftToReadback} disabled={busyAction !== null || !draftDirty}>Load Readback</button>
+              <button type="button" onClick={applyTorqueSettings} disabled={busyAction !== null}>Apply</button>
+              <button type="button" className="vcu-launch-secondary" onClick={reloadFromVcu} disabled={busyAction !== null || !draftDirty}>Reload from VCU</button>
             </div>
+
+            {draftDirty && (
+              <div className="vcu-launch-copy">Editor values differ from the most recent VCU config readback.</div>
+            )}
           </div>
 
-          <div className="vcu-config-sections">
-            <section className="vcu-config-group">
-              <div className="vcu-config-group-header">Launch Readback</div>
-              <div className="vcu-readback-grid">
-                <span className="vcu-config-item">Launch enabled <strong>{enumLabel(getSignal('VCU_Launch_Enabled'), BOOLEAN_LABELS)}</strong></span>
-                <span className="vcu-config-item">Active curve <strong>{enumLabel(getSignal('VCU_Launch_Active_Curve'), CURVE_LABELS)}</strong></span>
-                <span className="vcu-config-item">Best curve <strong>{enumLabel(bestCurve, CURVE_LABELS)}</strong></span>
-                <span className="vcu-config-item">Recommended slip <strong>{formatRatio(recommendedSlip)}</strong></span>
-                <span className="vcu-config-item">End RPM <strong>{getDisplay(getSignal('VCU_Launch_End_RPM'))}</strong></span>
-                <span className="vcu-config-item">Timeout <strong>{getDisplay(getSignal('VCU_Launch_Timeout_ms'))}</strong></span>
-                <span className="vcu-config-item">Max slip <strong>{formatRatio(getSignal('VCU_Launch_Max_Slip'))}</strong></span>
+          <div className="vcu-launch-preview-panel">
+            <div className="vcu-launch-chart-card">
+              <svg viewBox={`0 0 ${curvePreview.width} ${curvePreview.height}`} className="vcu-launch-chart" role="img" aria-label="Launch torque preview curve">
+                <rect x="0" y="0" width={curvePreview.width} height={curvePreview.height} rx="10" />
+                {curvePreview.guideValues.map((value) => {
+                  const y = curvePreview.padding.top + curvePreview.plotHeight - (value / curvePreview.maxTorque) * curvePreview.plotHeight;
+                  return (
+                    <g key={value}>
+                      <line x1={curvePreview.padding.left} x2={curvePreview.width - curvePreview.padding.right} y1={y} y2={y} className="vcu-launch-guide-line" />
+                      <text x="6" y={y + 4} className="vcu-launch-guide-label">{value}</text>
+                    </g>
+                  );
+                })}
+                {[0.2, 1.5, 3].map((time) => {
+                  const x = curvePreview.padding.left + (time / 3) * curvePreview.plotWidth;
+                  return <line key={time} x1={x} x2={x} y1={curvePreview.padding.top} y2={curvePreview.height - curvePreview.padding.bottom} className="vcu-launch-time-line" />;
+                })}
+                <polyline points={curvePreview.polyline} className="vcu-launch-curve-line" />
+                <text x={curvePreview.padding.left} y={curvePreview.height - 6} className="vcu-launch-axis-label">0.0s</text>
+                <text x={curvePreview.padding.left + (0.2 / 3) * curvePreview.plotWidth - 10} y={curvePreview.height - 6} className="vcu-launch-axis-label">0.2s</text>
+                <text x={curvePreview.padding.left + (1.5 / 3) * curvePreview.plotWidth - 10} y={curvePreview.height - 6} className="vcu-launch-axis-label">1.5s</text>
+                <text x={curvePreview.width - curvePreview.padding.right - 18} y={curvePreview.height - 6} className="vcu-launch-axis-label">3.0s</text>
+              </svg>
+              <div className="vcu-launch-chart-caption">
+                Off-the-line torque overrides the first 0.2 s. The quadratic ramp then transitions from init torque to final torque over the next 2.8 s.
               </div>
-            </section>
+            </div>
 
-            <section className="vcu-config-group">
-              <div className="vcu-config-group-header">Uploaded Curve Readback</div>
-              <div className="vcu-launch-readback-table">
-                <div className="vcu-launch-curve-head">
-                  <span>Point</span>
-                  <span>RPM</span>
-                  <span>Torque (Nm)</span>
-                </div>
-                {LAUNCH_CURVE_POINT_INDICES.map((index) => (
-                  <div key={index} className="vcu-launch-curve-row readback">
-                    <strong>{index}</strong>
-                    <span>{getDisplay(getSignal(`VCU_Launch_Actual_RPM_${index}`))}</span>
-                    <span>{getDisplay(getSignal(`VCU_Launch_Actual_Torque_${index}`))}</span>
-                  </div>
-                ))}
+            <div className="vcu-config-group">
+              <div className="vcu-config-group-header">VCU Readback</div>
+              <div className="vcu-readback-grid">
+                <span className="vcu-config-item">Off-the-line <strong>{getDisplay(getSignal('VCU_Launch_Torque_Offtheline'))}</strong></span>
+                <span className="vcu-config-item">Init torque <strong>{getDisplay(getSignal('VCU_Launch_Torque_Init'))}</strong></span>
+                <span className="vcu-config-item">Final torque <strong>{getDisplay(getSignal('VCU_Launch_Torque_Final'))}</strong></span>
+                <span className="vcu-config-item">Launch state <strong>{enumLabel(getSignal('VCU_Launch_State_Machine'), LAUNCH_STATE_LABELS)}</strong></span>
+                <span className="vcu-config-item">Launch armed <strong>{enumLabel(getSignal('VCU_Launch_Armed'), BOOLEAN_LABELS)}</strong></span>
+                <span className="vcu-config-item">Launch active <strong>{enumLabel(getSignal('VCU_Launch_Active'), BOOLEAN_LABELS)}</strong></span>
               </div>
-            </section>
+            </div>
           </div>
         </div>
       </section>

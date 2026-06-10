@@ -75,23 +75,9 @@ const VCU_FRAME_SIGNALS = {
     'VCU_Regen_Max_APPS',
     'VCU_Regen_Ryder_Mu',
     'VCU_Regen_Strategy',
-    'VCU_Launch_Enabled',
-    'VCU_Launch_End_RPM',
-    'VCU_Launch_Timeout_ms',
-    'VCU_Launch_Max_Slip',
-    'VCU_Launch_Best_Curve',
-    'VCU_Launch_Active_Curve',
-    'VCU_Launch_Recommended_Slip',
-    'VCU_Launch_Actual_RPM_0',
-    'VCU_Launch_Actual_RPM_1',
-    'VCU_Launch_Actual_RPM_2',
-    'VCU_Launch_Actual_RPM_3',
-    'VCU_Launch_Actual_RPM_4',
-    'VCU_Launch_Actual_Torque_0',
-    'VCU_Launch_Actual_Torque_1',
-    'VCU_Launch_Actual_Torque_2',
-    'VCU_Launch_Actual_Torque_3',
-    'VCU_Launch_Actual_Torque_4',
+    'VCU_Launch_Torque_Offtheline',
+    'VCU_Launch_Torque_Init',
+    'VCU_Launch_Torque_Final',
   ],
 };
 
@@ -133,12 +119,6 @@ const REGEN_STRATEGY_LABELS = {
   1: 'REAR_ONLY',
   2: 'AVERAGED',
   3: 'RYDER',
-};
-const LAUNCH_CURVE_LABELS = {
-  0: 'CURVE_A',
-  1: 'CURVE_B',
-  2: 'CURVE_C',
-  3: 'UPLOADED',
 };
 const REGEN_DEBUG_MUX_LABELS = {
   0: 'STATUS',
@@ -203,23 +183,9 @@ const CONFIG_OPTION_GROUPS = [
   {
     label: 'LAUNCH CONTROL',
     options: [
-      { value: 22, label: 'LAUNCH_ENABLED' },
-      { value: 23, label: 'LAUNCH_END_RPM' },
-      { value: 24, label: 'LAUNCH_TIMEOUT_MS' },
-      { value: 25, label: 'LAUNCH_MAX_SLIP' },
-      { value: 26, label: 'LAUNCH_BEST_CURVE' },
-      { value: 27, label: 'LAUNCH_ACTIVE_CURVE' },
-      { value: 28, label: 'LAUNCH_RECOMMENDED_SLIP' },
-      { value: 29, label: 'LAUNCH_ACTUAL_RPM_0' },
-      { value: 30, label: 'LAUNCH_ACTUAL_RPM_1' },
-      { value: 31, label: 'LAUNCH_ACTUAL_RPM_2' },
-      { value: 32, label: 'LAUNCH_ACTUAL_RPM_3' },
-      { value: 33, label: 'LAUNCH_ACTUAL_RPM_4' },
-      { value: 34, label: 'LAUNCH_ACTUAL_TORQUE_0' },
-      { value: 35, label: 'LAUNCH_ACTUAL_TORQUE_1' },
-      { value: 36, label: 'LAUNCH_ACTUAL_TORQUE_2' },
-      { value: 37, label: 'LAUNCH_ACTUAL_TORQUE_3' },
-      { value: 38, label: 'LAUNCH_ACTUAL_TORQUE_4' },
+      { value: 42, label: 'LAUNCH_TORQUE_OFFTHELINE' },
+      { value: 43, label: 'LAUNCH_TORQUE_INIT' },
+      { value: 44, label: 'LAUNCH_TORQUE_FINAL' },
     ],
   },
   {
@@ -286,29 +252,10 @@ const CONFIG_READBACK_GROUPS = [
   {
     title: 'Launch Control',
     fields: [
-      ['VCU_Launch_Enabled', 'Launch enabled', BOOLEAN_LABELS],
-      ['VCU_Launch_End_RPM', 'Launch end RPM'],
-      ['VCU_Launch_Timeout_ms', 'Launch timeout'],
-      ['VCU_Launch_Max_Slip', 'Launch max slip'],
-      ['VCU_Launch_Best_Curve', 'Best curve', LAUNCH_CURVE_LABELS],
-      ['VCU_Launch_Active_Curve', 'Active curve', LAUNCH_CURVE_LABELS],
-      ['VCU_Launch_Recommended_Slip', 'Recommended slip'],
+      ['VCU_Launch_Torque_Offtheline', 'Off-the-line torque'],
+      ['VCU_Launch_Torque_Init', 'Init torque'],
+      ['VCU_Launch_Torque_Final', 'Final torque'],
     ],
-  },
-  {
-    title: 'Uploaded Launch Curve',
-    fields: [
-      ['VCU_Launch_Actual_RPM_0', 'RPM 0'],
-      ['VCU_Launch_Actual_RPM_1', 'RPM 1'],
-      ['VCU_Launch_Actual_RPM_2', 'RPM 2'],
-      ['VCU_Launch_Actual_RPM_3', 'RPM 3'],
-      ['VCU_Launch_Actual_RPM_4', 'RPM 4'],
-      ['VCU_Launch_Actual_TORQUE_0', 'Torque 0'],
-      ['VCU_Launch_Actual_TORQUE_1', 'Torque 1'],
-      ['VCU_Launch_Actual_TORQUE_2', 'Torque 2'],
-      ['VCU_Launch_Actual_TORQUE_3', 'Torque 3'],
-      ['VCU_Launch_Actual_TORQUE_4', 'Torque 4'],
-    ].map(([signalName, label]) => [signalName.replace('TORQUE', 'Torque'), label]),
   },
   {
     title: 'DEBUG DEFINES',
@@ -526,9 +473,6 @@ function VCUDashboard({ messages, dbcFiles = [], onSendMessage, staleTimeoutMs =
       ...getVcuConfigFromSignals(getSignal),
     }));
   };
-
-  const launchRpmIndex = mux >= 29 && mux <= 33 ? mux - 29 : null;
-  const launchTorqueIndex = mux >= 34 && mux <= 38 ? mux - 34 : null;
 
   const handleSendConfig = async () => {
     if (typeof onSendMessage !== 'function') {
@@ -879,81 +823,22 @@ function VCUDashboard({ messages, dbcFiles = [], onSendMessage, staleTimeoutMs =
                 <input type="number" min="0" max="10" step="0.001" value={config.regenRyderMu} onChange={(event) => setConfig((prev) => ({ ...prev, regenRyderMu: event.target.value }))} />
               </label>
             )}
-            {mux === 22 && (
-              <label className="vcu-checkbox">
-                <input type="checkbox" checked={config.launchEnabled} onChange={(event) => setConfig((prev) => ({ ...prev, launchEnabled: event.target.checked }))} />
-                Launch enabled
+            {mux === 42 && (
+              <label>
+                Launch off-the-line torque (Nm)
+                <input type="number" min="0" max="230" step="1" value={config.launchTorqueOfftheline} onChange={(event) => setConfig((prev) => ({ ...prev, launchTorqueOfftheline: event.target.value }))} />
               </label>
             )}
-            {mux === 23 && (
+            {mux === 43 && (
               <label>
-                Launch end RPM
-                <input type="number" min="0" max="32767" step="1" value={config.launchEndRpm} onChange={(event) => setConfig((prev) => ({ ...prev, launchEndRpm: event.target.value }))} />
+                Launch init torque (Nm)
+                <input type="number" min="0" max="230" step="1" value={config.launchTorqueInit} onChange={(event) => setConfig((prev) => ({ ...prev, launchTorqueInit: event.target.value }))} />
               </label>
             )}
-            {mux === 24 && (
+            {mux === 44 && (
               <label>
-                Launch timeout (ms)
-                <input type="number" min="0" max="60000" step="1" value={config.launchTimeoutMs} onChange={(event) => setConfig((prev) => ({ ...prev, launchTimeoutMs: event.target.value }))} />
-              </label>
-            )}
-            {mux === 25 && (
-              <label>
-                Launch max slip
-                <input type="number" min="1" max="5" step="0.001" value={config.launchMaxSlip} onChange={(event) => setConfig((prev) => ({ ...prev, launchMaxSlip: event.target.value }))} />
-              </label>
-            )}
-            {mux === 26 && (
-              <label>
-                Launch best curve
-                <select value={config.launchBestCurve} onChange={(event) => setConfig((prev) => ({ ...prev, launchBestCurve: Number(event.target.value) }))}>
-                  <option value={0}>CURVE_A</option>
-                  <option value={1}>CURVE_B</option>
-                  <option value={2}>CURVE_C</option>
-                </select>
-              </label>
-            )}
-            {mux === 27 && (
-              <label>
-                Launch active curve
-                <select value={config.launchActiveCurve} onChange={(event) => setConfig((prev) => ({ ...prev, launchActiveCurve: Number(event.target.value) }))}>
-                  <option value={0}>CURVE_A</option>
-                  <option value={1}>CURVE_B</option>
-                  <option value={2}>CURVE_C</option>
-                  <option value={3}>UPLOADED</option>
-                </select>
-              </label>
-            )}
-            {mux === 28 && (
-              <label>
-                Launch recommended slip
-                <input type="number" min="1" max="5" step="0.001" value={config.launchRecommendedSlip} onChange={(event) => setConfig((prev) => ({ ...prev, launchRecommendedSlip: event.target.value }))} />
-              </label>
-            )}
-            {launchRpmIndex !== null && (
-              <label>
-                Launch actual RPM {launchRpmIndex}
-                <input
-                  type="number"
-                  min="0"
-                  max="32767"
-                  step="1"
-                  value={config[`launchActualRpm${launchRpmIndex}`]}
-                  onChange={(event) => setConfig((prev) => ({ ...prev, [`launchActualRpm${launchRpmIndex}`]: event.target.value }))}
-                />
-              </label>
-            )}
-            {launchTorqueIndex !== null && (
-              <label>
-                Launch actual torque {launchTorqueIndex} (Nm)
-                <input
-                  type="number"
-                  min="0"
-                  max="230"
-                  step="1"
-                  value={config[`launchActualTorque${launchTorqueIndex}`]}
-                  onChange={(event) => setConfig((prev) => ({ ...prev, [`launchActualTorque${launchTorqueIndex}`]: event.target.value }))}
-                />
+                Launch final torque (Nm)
+                <input type="number" min="0" max="230" step="1" value={config.launchTorqueFinal} onChange={(event) => setConfig((prev) => ({ ...prev, launchTorqueFinal: event.target.value }))} />
               </label>
             )}
             <button type="button" onClick={handleSendConfig} disabled={sendBusy}>
