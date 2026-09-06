@@ -4,7 +4,7 @@ NS_ :
 
 BS_:
 
-BU_: BL DBF DBL DBR FR Vector__XXX
+BU_: DBF DBL DBR Vector__XXX
 
 BO_ 2376073216 DBF_Status: 8 DBF
  SG_ DBF_Status_Timestamp : 0|32@1+ (1.0,0.0) [0.0|4294967295.0] "ms" Vector__XXX
@@ -82,6 +82,11 @@ BO_ 2376601600 DBF_Accel_Timer_Distance: 8 DBF
 BO_ 2376663040 DBF_ODO_LR: 8 DBF
  SG_ FR_Odo : 0|32@1+ (1.0,0.0) [0.0|4294967295.0] "" Vector__XXX
  SG_ FL_Odo : 32|32@1+ (1.0,0.0) [0.0|4294967295.0] "" Vector__XXX
+
+BO_ 2376728576 DBF_Lidar: 8 DBF
+ SG_ Lidar_Height : 0|16@1+ (1.0,0.0) [0.0|65535.0] "" Vector__XXX
+ SG_ Lidar_Strength : 16|16@1+ (1.0,0.0) [0.0|65535.0] "" Vector__XXX
+ SG_ Lidar_Temp : 32|16@1+ (1.0,0.0) [0.0|65535.0] "" Vector__XXX
 
 BO_ 2377121792 DBL_Status: 8 DBL
  SG_ DBL_Status_Timestamp : 0|32@1+ (1.0,0.0) [0.0|4294967295.0] "ms" Vector__XXX
@@ -168,18 +173,6 @@ BO_ 2378563584 DBR_Tach_R: 8 DBR
  SG_ DBR_Tach_R_Timeout : 1|1@1+ (1.0,0.0) [0.0|1.0] "" Vector__XXX
  SG_ DBR_Tach_R_Avg_Delta : 8|32@1+ (1.0,0.0) [0.0|4294967295.0] "us" Vector__XXX
  SG_ DBR_Tach_R_RPM : 40|16@1- (1.0,0.0) [-6000.0|6000.0] "RPM" Vector__XXX
-
-BO_ 187 BL_BrakeTemp: 8 BL
- SG_ BL_BrakeTemp_Ch1 : 7|16@0+ (0.1,-100.0) [-1000.0|1000.0] "C" Vector__XXX
- SG_ BL_BrakeTemp_Ch2 : 23|16@0+ (0.1,-100.0) [-1000.0|1000.0] "C" Vector__XXX
- SG_ BL_BrakeTemp_Ch3 : 39|16@0+ (0.1,-100.0) [-1000.0|1000.0] "C" Vector__XXX
- SG_ BL_BrakeTemp_Ch4 : 55|16@0+ (0.1,-100.0) [-1000.0|1000.0] "C" Vector__XXX
-
-BO_ 251 FR_BrakeTemp: 8 FR
- SG_ FR_BrakeTemp_Ch1 : 7|16@0+ (0.1,-100.0) [-1000.0|1000.0] "C" Vector__XXX
- SG_ FR_BrakeTemp_Ch2 : 23|16@0+ (0.1,-100.0) [-1000.0|1000.0] "C" Vector__XXX
- SG_ FR_BrakeTemp_Ch3 : 39|16@0+ (0.1,-100.0) [-1000.0|1000.0] "C" Vector__XXX
- SG_ FR_BrakeTemp_Ch4 : 55|16@0+ (0.1,-100.0) [-1000.0|1000.0] "C" Vector__XXX
 
 VAL_ 2376138752 DBF_WSPD_FL_Valid 0 "FALSE" 1 "TRUE" ;
 VAL_ 2376138752 DBF_WSPD_FL_Timeout 0 "FALSE" 1 "TRUE" ;

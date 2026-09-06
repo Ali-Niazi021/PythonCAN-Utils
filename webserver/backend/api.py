@@ -29,6 +29,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 import uvicorn
 import shutil
+from collections import deque
 
 # Add parent directories to path for driver imports
 backend_dir = Path(__file__).parent
@@ -214,6 +215,13 @@ class CANMessageData(BaseModel):
     dlc: int
 
 
+class RecentMessagesResponse(BaseModel):
+    """Recent received CAN messages for clients catching up after websocket gaps."""
+    success: bool
+    messages: List[dict]
+    latest_sequence: int = 0
+
+
 class DBCLoadRequest(BaseModel):
     """Request to load a DBC file"""
     file_path: str
@@ -389,6 +397,9 @@ class CANBackend:
         self._websocket_flush_lock = threading.Lock()
         self._websocket_flush_requested: bool = False
         self._websocket_flush_task: Optional[asyncio.Task] = None
+        self._recent_messages = deque(maxlen=1000)
+        self._recent_messages_lock = threading.Lock()
+        self._message_sequence: int = 0
         
         # Message statistics
         self.message_count: int = 0
@@ -734,6 +745,36 @@ class CANBackend:
 
         self.message_count += 1
         return self.message_count
+
+    def _store_recent_message(self, message_data: dict) -> dict:
+        """Assign a monotonic sequence and retain the frame for catch-up reads."""
+        with self._recent_messages_lock:
+            self._message_sequence += 1
+            stored_message = {
+                **message_data,
+                'sequence': self._message_sequence,
+            }
+            self._recent_messages.append(stored_message)
+            return stored_message
+
+    def get_recent_messages(self, since_sequence: int = 0, limit: int = 500) -> dict:
+        """Return recent CAN frames newer than a client-known sequence."""
+        normalized_since = max(0, int(since_sequence or 0))
+        normalized_limit = max(1, min(1000, int(limit or 500)))
+
+        with self._recent_messages_lock:
+            matching_messages = [
+                message
+                for message in self._recent_messages
+                if int(message.get('sequence', 0)) > normalized_since
+            ][-normalized_limit:]
+            latest_sequence = self._message_sequence
+
+        return {
+            'success': True,
+            'messages': matching_messages,
+            'latest_sequence': latest_sequence,
+        }
 
     def _normalize_dbc_filename(self, filename: str) -> str:
         """Return a safe filename without path segments."""
@@ -1960,6 +2001,7 @@ class CANBackend:
             message_data = self._build_simulated_message(can_id, payload, is_extended, target_bus_id)
             message_data['source'] = 'hvc_test_mode_tx'
             self._increment_message_count(target_bus_id)
+            message_data = self._store_recent_message(message_data)
             await self.broadcast_message(message_data)
             return True
         except Exception as e:
@@ -2132,6 +2174,7 @@ class CANBackend:
             can_id, is_extended = self._message_identity(message)
             message_data = self._build_simulated_message(can_id, payload, is_extended, bus_id)
             self._increment_message_count(bus_id)
+            message_data = self._store_recent_message(message_data)
             await self.broadcast_message(message_data)
             return True
         except Exception as e:
@@ -2854,9 +2897,6 @@ class CANBackend:
         if message_count <= 5:
             print(f"[RX][{target_bus_id or 'unknown'}] Message #{message_count}: ID=0x{msg.id:X}, Extended={msg.is_extended}, DLC={msg.dlc}, Data={msg.data.hex()}")
 
-        if not self.active_connections:
-            return
-        
         # Check for server-decoded data (Network driver with DBC loaded on server)
         if hasattr(msg, 'server_decoded') and msg.server_decoded:
             # Use server-decoded data - convert signals list to dict format
@@ -2893,6 +2933,11 @@ class CANBackend:
         else:
             if message_count <= 2:
                 print(f"[RX] No DBC database available for decoding")
+
+        message_data = self._store_recent_message(message_data)
+
+        if not self.active_connections:
+            return
         
         # Queue websocket broadcast on the event loop (if available)
         if self.loop and self.loop.is_running():
@@ -3264,6 +3309,12 @@ async def get_dbc_messages():
 async def get_stats():
     """Get message statistics"""
     return backend.get_message_stats()
+
+
+@app.get("/messages/recent", response_model=RecentMessagesResponse)
+async def get_recent_messages(since_sequence: int = 0, limit: int = 500):
+    """Get recently received CAN frames for websocket catch-up."""
+    return backend.get_recent_messages(since_sequence, limit)
 
 
 @app.post("/simulation/start")

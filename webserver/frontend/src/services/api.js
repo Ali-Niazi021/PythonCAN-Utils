@@ -69,6 +69,16 @@ class ApiService {
     return response.data;
   }
 
+  async getRecentMessages(sinceSequence = 0, limit = 500) {
+    const response = await this.client.get('/messages/recent', {
+      params: {
+        since_sequence: sinceSequence,
+        limit,
+      },
+    });
+    return response.data;
+  }
+
   async startSimulation() {
     const response = await this.client.post('/simulation/start');
     return response.data;

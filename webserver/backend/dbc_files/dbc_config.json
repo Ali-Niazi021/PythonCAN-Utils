@@ -21,16 +21,16 @@
       "enabled": true
     },
     {
-      "filename": "DAQ-Firmware.dbc",
-      "enabled": true
-    },
-    {
       "filename": "hvc.dbc",
       "enabled": true
     },
     {
       "filename": "master.dbc",
       "enabled": false
+    },
+    {
+      "filename": "DAQ-Firmware.dbc",
+      "enabled": true
     }
   ]
 }

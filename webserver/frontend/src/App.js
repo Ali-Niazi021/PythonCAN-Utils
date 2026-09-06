@@ -12,6 +12,7 @@ import VCUDashboard from './components/VCUDashboard';
 import VCULaunchControlDashboard from './components/VCULaunchControlDashboard';
 import DAQDashboard from './components/DAQDashboard';
 import DrivingDashboard from './components/DrivingDashboard';
+import DrivingMapDashboard from './components/DrivingMapDashboard';
 import { apiService } from './services/api';
 import { websocketService } from './services/websocket';
 import { syncFreshnessClock } from './hooks/useStaleness';
@@ -262,6 +263,8 @@ function App() {
   const canStateRef = useRef('unknown'); // tracks backend CAN state for toast gating
   const connectWebSocketRef = useRef(null);
   const autoConnectAttemptedBusIdsRef = useRef(new Set());
+  const latestMessageSequenceRef = useRef(0);
+  const seenMessageSequencesRef = useRef(new Set());
   
   // Raw message callbacks for components that need to see ALL messages (not aggregated)
   const rawMessageCallbacksRef = useRef([]);
@@ -279,47 +282,84 @@ function App() {
   const dbcFiles = dbcConfig.files || [];
   const dbcContext = dbcConfig.active_signature;
 
-  // Start periodic flushing when connected
-  useEffect(() => {
-    if (connected) {
-      // Flush messages every 100ms
-      flushIntervalRef.current = setInterval(() => {
-        if (messageBufferRef.current.length > 0) {
-          const bufferedMessages = [...messageBufferRef.current];
-          messageBufferRef.current = [];
+  const flushBufferedMessages = useCallback(() => {
+    if (messageBufferRef.current.length === 0) {
+      return;
+    }
 
-          setExplorerMessages((previousMessages) => aggregateMessages(
-            previousMessages,
-            bufferedMessages,
-            getExplorerAggregateKey,
-            explorerMessageCountsRef.current,
-            compareExplorerMessages
-          ));
+    const bufferedMessages = [...messageBufferRef.current];
+    messageBufferRef.current = [];
 
-          setMessages((previousMessages) => aggregateMessages(
-            previousMessages,
-            bufferedMessages,
-            getDashboardAggregateKey,
-            dashboardMessageCountsRef.current,
-            compareDashboardMessages
-          ));
-        }
-      }, 100);
-    } else {
-      // Clear interval when disconnected
-      if (flushIntervalRef.current) {
-        clearInterval(flushIntervalRef.current);
-        flushIntervalRef.current = null;
+    setExplorerMessages((previousMessages) => aggregateMessages(
+      previousMessages,
+      bufferedMessages,
+      getExplorerAggregateKey,
+      explorerMessageCountsRef.current,
+      compareExplorerMessages
+    ));
+
+    setMessages((previousMessages) => aggregateMessages(
+      previousMessages,
+      bufferedMessages,
+      getDashboardAggregateKey,
+      dashboardMessageCountsRef.current,
+      compareDashboardMessages
+    ));
+  }, []);
+
+  const enqueueIncomingCanMessage = useCallback((message) => {
+    if (!message || message.type === 'heartbeat' || message.type === 'connection_status') {
+      return false;
+    }
+
+    const sequence = Number(message.sequence);
+    if (Number.isFinite(sequence) && sequence > 0) {
+      if (seenMessageSequencesRef.current.has(sequence)) {
+        return false;
+      }
+
+      seenMessageSequencesRef.current.add(sequence);
+      latestMessageSequenceRef.current = Math.max(latestMessageSequenceRef.current, sequence);
+
+      if (seenMessageSequencesRef.current.size > 5000) {
+        const recentSequences = Array.from(seenMessageSequencesRef.current).slice(-2500);
+        seenMessageSequencesRef.current = new Set(recentSequences);
       }
     }
-    
+
+    const observedAtMs = Date.now();
+    syncFreshnessClock(message.received_at, observedAtMs);
+    lastHeartbeatRef.current = observedAtMs;
+
+    // Notify raw message callbacks (for components like ModuleConfig that need ALL messages)
+    rawMessageCallbacksRef.current.forEach(callback => {
+      try {
+        callback(message);
+      } catch (e) {
+        console.error('[App] Raw message callback error:', e);
+      }
+    });
+
+    // Buffer incoming messages - they'll be flushed by the interval
+    messageBufferRef.current.push(message);
+    return true;
+  }, []);
+
+  useEffect(() => {
+    if (connected) {
+      flushIntervalRef.current = setInterval(flushBufferedMessages, 100);
+    } else if (flushIntervalRef.current) {
+      clearInterval(flushIntervalRef.current);
+      flushIntervalRef.current = null;
+    }
+
     return () => {
       if (flushIntervalRef.current) {
         clearInterval(flushIntervalRef.current);
         flushIntervalRef.current = null;
       }
     };
-  }, [connected]);
+  }, [connected, flushBufferedMessages]);
 
   const fetchDevices = useCallback(async () => {
     try {
@@ -477,25 +517,11 @@ function App() {
         return;
       }
 
-      const observedAtMs = Date.now();
-      syncFreshnessClock(message.received_at, observedAtMs);
-      lastHeartbeatRef.current = observedAtMs;
-
-      // Notify raw message callbacks (for components like ModuleConfig that need ALL messages)
-      rawMessageCallbacksRef.current.forEach(callback => {
-        try {
-          callback(message);
-        } catch (e) {
-          console.error('[App] Raw message callback error:', e);
-        }
-      });
-      
-      // Buffer incoming messages - they'll be flushed by the interval
-      messageBufferRef.current.push(message);
+      enqueueIncomingCanMessage(message);
     }, () => {
       checkConnectionStatus();
     });
-  }, [checkConnectionStatus, showToast, simulationActive]);
+  }, [checkConnectionStatus, enqueueIncomingCanMessage, showToast, simulationActive]);
 
   useEffect(() => {
     connectWebSocketRef.current = connectWebSocket;
@@ -722,6 +748,9 @@ function App() {
         const statsData = normalizeStats(await apiService.getStats());
         setStats(statsData);
 
+        const recentData = await apiService.getRecentMessages(latestMessageSequenceRef.current, 500);
+        (recentData.messages || []).forEach(enqueueIncomingCanMessage);
+
         const now = Date.now();
         if (isPageVisible() && now - lastHeartbeatRef.current > 15000) {
           handleWakeRecovery();
@@ -732,7 +761,7 @@ function App() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [connected, handleWakeRecovery]);
+  }, [connected, enqueueIncomingCanMessage, handleWakeRecovery]);
 
   useEffect(() => {
     const onVisibilityChange = () => {
@@ -1178,6 +1207,43 @@ function App() {
             onStaleTimeoutChange={setStaleTimeoutMs}
           >
             <DrivingDashboard
+              messages={messages}
+              dbcFiles={dbcFiles}
+              staleTimeoutMs={effectiveStaleTimeoutMs}
+            />
+          </CANExplorer>
+        )}
+        {activeTab === 'driving-map-dashboard' && (
+          <CANExplorer
+            connected={connected}
+            messages={explorerMessages}
+            onClearMessages={handleClearMessages}
+            onSendMessage={handleSendMessage}
+            onLoadDBC={handleLoadDBC}
+            onUpdateDBCConfig={handleUpdateDBCConfig}
+            onDeleteDBC={handleDeleteDBC}
+            dbcLoaded={dbcLoaded}
+            dbcFile={dbcFile}
+            dbcFiles={dbcFiles}
+            dbcContext={dbcContext}
+            devices={devices}
+            onConnect={handleConnect}
+            onDisconnect={handleDisconnect}
+            onRefreshDevices={fetchDevices}
+            connectionStatus={connectionStatus}
+            stats={stats}
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            onRegisterRawCallback={registerRawMessageCallback}
+            simulationActive={simulationActive}
+            onStartSimulation={handleStartSimulation}
+            onStopSimulation={handleStopSimulation}
+            staleTimeoutMs={staleTimeoutMs}
+            staleMessagesEnabled={staleMessagesEnabled}
+            onStaleMessagesEnabledChange={setStaleMessagesEnabled}
+            onStaleTimeoutChange={setStaleTimeoutMs}
+          >
+            <DrivingMapDashboard
               messages={messages}
               dbcFiles={dbcFiles}
               staleTimeoutMs={effectiveStaleTimeoutMs}
