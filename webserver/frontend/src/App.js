@@ -12,7 +12,6 @@ import VCUDashboard from './components/VCUDashboard';
 import VCULaunchControlDashboard from './components/VCULaunchControlDashboard';
 import DAQDashboard from './components/DAQDashboard';
 import DrivingDashboard from './components/DrivingDashboard';
-import DrivingMapDashboard from './components/DrivingMapDashboard';
 import { apiService } from './services/api';
 import { websocketService } from './services/websocket';
 import { syncFreshnessClock } from './hooks/useStaleness';
@@ -1207,43 +1206,6 @@ function App() {
             onStaleTimeoutChange={setStaleTimeoutMs}
           >
             <DrivingDashboard
-              messages={messages}
-              dbcFiles={dbcFiles}
-              staleTimeoutMs={effectiveStaleTimeoutMs}
-            />
-          </CANExplorer>
-        )}
-        {activeTab === 'driving-map-dashboard' && (
-          <CANExplorer
-            connected={connected}
-            messages={explorerMessages}
-            onClearMessages={handleClearMessages}
-            onSendMessage={handleSendMessage}
-            onLoadDBC={handleLoadDBC}
-            onUpdateDBCConfig={handleUpdateDBCConfig}
-            onDeleteDBC={handleDeleteDBC}
-            dbcLoaded={dbcLoaded}
-            dbcFile={dbcFile}
-            dbcFiles={dbcFiles}
-            dbcContext={dbcContext}
-            devices={devices}
-            onConnect={handleConnect}
-            onDisconnect={handleDisconnect}
-            onRefreshDevices={fetchDevices}
-            connectionStatus={connectionStatus}
-            stats={stats}
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-            onRegisterRawCallback={registerRawMessageCallback}
-            simulationActive={simulationActive}
-            onStartSimulation={handleStartSimulation}
-            onStopSimulation={handleStopSimulation}
-            staleTimeoutMs={staleTimeoutMs}
-            staleMessagesEnabled={staleMessagesEnabled}
-            onStaleMessagesEnabledChange={setStaleMessagesEnabled}
-            onStaleTimeoutChange={setStaleTimeoutMs}
-          >
-            <DrivingMapDashboard
               messages={messages}
               dbcFiles={dbcFiles}
               staleTimeoutMs={effectiveStaleTimeoutMs}
