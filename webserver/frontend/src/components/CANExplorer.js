@@ -1487,12 +1487,6 @@ function CANExplorer({
               >
                 Driving Dashboard
               </button>
-              <button
-                className={`sidebar-tab submenu ${activeTab === 'driving-map-dashboard' ? 'active' : ''}`}
-                onClick={() => onTabChange('driving-map-dashboard')}
-              >
-                Map Dashboard
-              </button>
             </div>
           </div>
         </div>
