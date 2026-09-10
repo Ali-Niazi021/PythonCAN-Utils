@@ -202,6 +202,43 @@ Get list of messages from loaded DBC file.
 }
 ```
 
+### Live Stream Forwarding
+
+Push every CAN frame (real, simulated, and HVC test-mode) to an external
+time-series database for dashboards / live graphs. Frames are buffered in a
+bounded queue and shipped in batches by a background task; a slow or
+unreachable sink never blocks CAN reception (oldest frames are dropped and
+counted).
+
+Configure via env vars (see `.env.example`) or at runtime. The default
+serializer emits **InfluxDB v2 line protocol** and writes two measurements:
+
+- `can_frame` — tags `can_id`, `source` (`live`/`sim`/`hvc_test`), `ext`;
+  fields `dlc`, `data` (hex), `b0..bN` (per-byte), `remote`
+- `can_signal` — one point per decoded signal — tags `can_id`, `source`,
+  `message`, `signal`, `unit`; field `value` (float), plus `state` (string)
+  for enum signals
+
+#### `GET /stream/forward/status`
+Returns enabled/running state, sink URL, and counters (`enqueued`, `sent`,
+`dropped`, `batches`, `failures`, `last_error`, `last_success_ts`).
+
+#### `POST /stream/forward/config`
+Update the sink at runtime (persisted to `stream_forward_config.json`). All
+fields optional:
+
+```json
+{
+  "enabled": true,
+  "url": "http://dbhost:8086/api/v2/write?org=trev&bucket=can&precision=ns",
+  "token": "<influx-token>",
+  "batch_size": 5000,
+  "flush_ms": 250,
+  "include_frames": true,
+  "include_signals": true
+}
+```
+
 ### Statistics
 
 #### `GET /stats`

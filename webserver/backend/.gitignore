@@ -1,0 +1,5 @@
+# Runtime-written config (may contain an auth token)
+stream_forward_config.json
+
+# Temp upload staging
+temp/

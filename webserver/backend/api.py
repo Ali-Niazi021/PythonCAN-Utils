@@ -90,6 +90,12 @@ except ImportError:
     DBC_SUPPORT = False
     print("Warning: cantools not installed. DBC support disabled.")
 
+# Live stream forwarder (push CAN traffic to an external time-series DB)
+from stream_forwarder import StreamForwarder
+
+# Created on startup once an event loop is running.
+forwarder: Optional[StreamForwarder] = None
+
 
 # ============================================================================
 # Pydantic Models (API Request/Response Schemas)
@@ -289,6 +295,20 @@ class HVCTestModeConfigRequest(BaseModel):
     error_flags_byte3: int = 0
     warning_summary: int = 0
     fault_count: int = 0
+
+
+class StreamForwardConfigRequest(BaseModel):
+    """Runtime update for the live stream forwarder. All fields optional."""
+    enabled: Optional[bool] = None
+    url: Optional[str] = None
+    token: Optional[str] = None
+    serializer: Optional[str] = None
+    batch_size: Optional[int] = None
+    flush_ms: Optional[int] = None
+    include_frames: Optional[bool] = None
+    include_signals: Optional[bool] = None
+    measurement_frame: Optional[str] = None
+    measurement_signal: Optional[str] = None
 
 
 # ============================================================================
@@ -774,6 +794,9 @@ class CANBackend:
         await self.stop_hvc_test_mode()
         await self.stop_simulation()
         await self.stop_health_monitor()
+
+        if forwarder is not None:
+            await forwarder.stop()
 
         if self.is_connected:
             await asyncio.to_thread(self.disconnect)
@@ -2122,21 +2145,29 @@ class CANBackend:
             if self.message_count <= 5:
                 print(f"[RX] NOT broadcasting - loop={self.loop}, running={self.loop.is_running() if self.loop else 'N/A'}")
     
+    def _stream_source(self) -> str:
+        """Origin tag for forwarded frames."""
+        return 'sim' if self._simulation_active else 'live'
+
     async def broadcast_message(self, message: dict):
         """Broadcast message to all connected WebSocket clients"""
         disconnected = []
-        
+
         for connection in self.active_connections:
             try:
                 await connection.send_json(message)
             except Exception as e:
                 print(f"Error broadcasting to client: {e}")
                 disconnected.append(connection)
-        
+
         # Remove disconnected clients
         for connection in disconnected:
             if connection in self.active_connections:
                 self.active_connections.remove(connection)
+
+        # Fan out to the external time-series DB (non-blocking; drops on backpressure).
+        if forwarder is not None:
+            forwarder.enqueue(message, self._stream_source())
     
     async def add_websocket_connection(self, websocket: WebSocket):
         """Add a WebSocket connection"""
@@ -2548,6 +2579,38 @@ async def set_hvc_test_mode_config(request: HVCTestModeConfigRequest):
 
 
 # ============================================================================
+# Live Stream Forwarder Endpoints
+# ============================================================================
+
+@app.get("/stream/forward/status")
+async def get_stream_forward_status():
+    """Return live stream forwarder state and throughput counters."""
+    if forwarder is None:
+        return {"enabled": False, "running": False, "httpx_available": False}
+    return forwarder.status()
+
+
+@app.post("/stream/forward/config")
+async def update_stream_forward_config(request: StreamForwardConfigRequest):
+    """Update the forwarder sink URL/token/batching and enable or disable it."""
+    if forwarder is None:
+        raise HTTPException(status_code=503, detail="Stream forwarder not initialized")
+
+    updates = request.dict(exclude_none=True)
+
+    if updates.get("batch_size") is not None and updates["batch_size"] < 1:
+        raise HTTPException(status_code=422, detail="batch_size must be >= 1")
+    if updates.get("flush_ms") is not None and updates["flush_ms"] < 20:
+        raise HTTPException(status_code=422, detail="flush_ms must be >= 20")
+    if updates.get("serializer") is not None and updates["serializer"] != "influx":
+        raise HTTPException(status_code=422, detail="serializer must be 'influx'")
+    if updates.get("enabled") and not (updates.get("url") or forwarder.status()["url"]):
+        raise HTTPException(status_code=422, detail="url required to enable forwarding")
+
+    return await forwarder.apply_config(updates)
+
+
+# ============================================================================
 # Transmit List Endpoints
 # ============================================================================
 
@@ -2789,6 +2852,18 @@ async def startup_event():
     backend.loop = asyncio.get_running_loop()
     print("[OK] Event loop initialized for CAN message broadcasting")
     backend.start_health_monitor()
+
+    global forwarder
+    try:
+        forwarder = StreamForwarder()
+        await forwarder.start()
+        fwd_status = forwarder.status()
+        print(
+            f"[OK] Stream forwarder: enabled={fwd_status['enabled']}, "
+            f"url={fwd_status['url'] or '<unset>'}"
+        )
+    except Exception as e:
+        print(f"[ERROR] Failed to start stream forwarder: {e}")
 
     try:
         backend.load_dbc_config()
